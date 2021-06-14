@@ -1,7 +1,7 @@
 # Makefile for ReCon
 #
 #
-VERSION = 1.08
+VERSION = 1.09
 
 ## where you want things installed
 BINDIR  = ../bin
