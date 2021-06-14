@@ -192,7 +192,11 @@ IMAGE_t *partner(IMAGE_t *i) {
   return &(i->to_msp->query);
 }
 
-
+// RMH: If
+//         - same sequence
+//         - the overlap between the two sequences is
+//           >= cutoff * length of either sequence
+//      cutoff must be between 0-1
 int sing_cov(FRAG_t *f1, FRAG_t *f2, float cutoff) {
   int32_t l1, l2, l, lb, rb;
   if (f1->seq_name == f2->seq_name /*!strncmp(f1->seq_name, f2->seq_name, NAME_LEN)*/) {

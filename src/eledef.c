@@ -1,8 +1,25 @@
+/*
+ * eledef.c
+ *
+ * Element definition using single linkage clustering
+ *
+ * Author: Zhirong Bao
+ * Minor modifications by: Robert Hubley, Institute for Systems Biology
+ *
+ * RMH Notes:
+ *    cutoff defined in main() is set to 0.5 ( method 1, single coverage )
+ *    or 0.9 (method 2, double coverage).
+ *      - This is the cutoff for fractional overlap between images.
+ */
 #include "msps.h"
-
-
 #define IMG_CAP 500000
 
+/*
+ * Macros
+ *   The code makes frequent use of macros to optimize
+ *   program execution.
+ */
+// Re-evaluate orphan images (remain list) after an element boundary has been extended
 #define INCLUDE_IMAGE 	    if (method == 1) {cov=sing_cov(&ele_frag, &cur->to_image->frag, cutoff);}\
             else {cov=doub_cov(&ele_frag, &cur->to_image->frag, cutoff);}\
             if (cov) {\
@@ -34,7 +51,8 @@
 	      cur = cur->next;\
 	    }
 
-#define ADD_EP      ep_tmp = (EPROT_t *) malloc(sizeof(EPROT_t));\
+// Save element to EP linked list
+#define SAVE_ELEMENT_TO_EP_LIST      ep_tmp = (EPROT_t *) malloc(sizeof(EPROT_t));\
       ep_tmp->flag = 0;\
       ep_tmp->index = (*ecp);\
       ep_tmp->img_no = img_ct;\
@@ -45,7 +63,8 @@
       ep_tail = ep_tmp;\
       fprintf(all_ele, "%d %s %d %d\n", (*ecp), ele_frag.seq_name, ele_frag.lb, ele_frag.rb)
 
-#define RITE_THING	ritetime = 0;\
+// Initialize new element using first image from remain list
+#define INIT_ELEMENT_FROM_REMAIN_LIST	ritetime = 0;\
 	(*ecp) ++;\
         img_ct = 1;\
 	ele_frag = cur->to_image->frag;\
@@ -62,15 +81,18 @@
 	prev = NULL;\
 	cur = remain
 
-#define DO_IT	  if (ele_frag.seq_name == cur->to_image->frag.seq_name /*!strncmp(ele_frag.seq_name, cur->to_image->frag.seq_name, NAME_LEN)*/ && ele_frag.rb - cur->to_image->frag.lb > 10) {\
+// This is basically checking the remaining list for images to include or giving up we hit a boundary
+#define EVALUATE_REMAINING_IMAGE	  if (ele_frag.seq_name == cur->to_image->frag.seq_name /*!strncmp(ele_frag.seq_name, cur->to_image->frag.seq_name, NAME_LEN)*/ && ele_frag.rb - cur->to_image->frag.lb > 10) {\
 	    INCLUDE_IMAGE;\
 	  } else {\
-	    ADD_EP;\
+	    SAVE_ELEMENT_TO_EP_LIST;\
 	    ritetime = 1;\
 	    break;\
 	  }
 
-#define BACK_UP	 imgp = (IMAGE_t *) malloc(sizeof(IMAGE_t));\
+// Save image to "remain" linked list
+//     remain* = img1.next->img2.next->img3.next = tail*
+#define SAVE_IMG_TO_REMAINING_LIST	 imgp = (IMAGE_t *) malloc(sizeof(IMAGE_t));\
 	*imgp = img;\
 	tmp = (IMG_DATA_t *) malloc(sizeof(IMG_DATA_t));\
 	tmp->to_image = imgp;\
@@ -108,8 +130,6 @@
 	}\
       }
 
-
-
 typedef struct msp_prototype {
   int pe, se;
 } MPROT_t;
@@ -126,12 +146,9 @@ typedef struct ele_prototype {
   struct ele_prototype *next;
 } EPROT_t;
 
-
 void ele_def(int, FILE *, float, EPROT_t **, int *, MPROT_t **);
 void img_charge(IPROT_t **, int, FILE *);
 int index_cmp(const void *, const void *);
-
-
 FILE *msp_no, *all_ele, *img_prot, *ele_no, *err, *size_list;
 
 
@@ -144,11 +161,11 @@ int main (int argc, char *argv[]) {
 
   IPROT_t **all_iprot, **iprot_shadow;
   int iprot_ct=0, partner_index;
-  char ele_name[50]; /*name of element used as name of the ele file*/
+  char ele_name[50]; //name of element used as name of the ele file
 
   FILE *frags, *seq_list, *msp_file;
 
-  /* processing command line */
+  // processing command line
   if (argc == 1) {
     printf("usage: ele_def seq_list msp_file method cut_off\nfor method, choose 'single' or 'double'\ncutoff is optional\n");
     exit(1);
@@ -222,6 +239,7 @@ int main (int argc, char *argv[]) {
   fclose(frags);
   img_prot = fopen("ele_def_res/img_prot", "r");
 
+  // Initialize a structure to hold all elements
   ep_array = (EPROT_t **) malloc(ele_ct*sizeof(EPROT_t *));
   ep_tmp = all_ep;
   i = 0;
@@ -231,6 +249,7 @@ int main (int argc, char *argv[]) {
     ep_tmp = ep_tmp->next;
   }
 
+  // Initialize structures to hold images
   all_iprot = (IPROT_t **) malloc(IMG_CAP*sizeof(IPROT_t *));
   iprot_shadow = (IPROT_t **) malloc(IMG_CAP*sizeof(IPROT_t *));
   for (i=0; i<IMG_CAP; i++) {
@@ -239,9 +258,11 @@ int main (int argc, char *argv[]) {
     *(iprot_shadow+i) = *(all_iprot+i);
   }
 
+  // Read in Element/Image tupples and write out log files for eles
   while (fgets(line, 100, img_prot)) {
     sscanf(line, "%d %d\n", &(*(all_iprot+iprot_ct))->ele_index, &(*(all_iprot+iprot_ct))->index);
     iprot_ct ++;
+    // Do something if we reach our structure capacity
     if (iprot_ct == IMG_CAP) {
       DUMBBELL;
       iprot_ct = 0;
@@ -252,6 +273,7 @@ int main (int argc, char *argv[]) {
     for (i=0; i<iprot_ct; i++) {*(iprot_shadow+i) = *(all_iprot+i);}
     DUMBBELL;
   }
+
   /* cleaning up */
   for (i=0; i<IMG_CAP; i++) {
     free((*(all_iprot+i))->to_msp);
@@ -284,9 +306,14 @@ void ele_def(int method, FILE *frags, float cutoff, EPROT_t **all_epp, int *ecp,
   IMG_DATA_t *cur, *prev=NULL, *remain=NULL, *tail, *tmp;
   short ritetime;
   EPROT_t *ep_tail, *ep_tmp;
-  /*short to_follow, to_finish=1;*/
 
   ritetime = 1; /* ritetime marks the right time to start a new element */
+  // Read in MSP summary lines containing:
+  //   - MSP Index/Img Index: This is a unique identifier for a line in the MSP file
+  //   - Score: The MSP score
+  //   - Query Identifier/Fragname: The unique identifier for the query sequence in the MSP
+  //   - Start Position/frag.lb: The start position of the MSP in the query sequence (start<end, 1 based, fully closed)
+  //   - End Position/frag.rb: The end position of the MSP in the query sequence (start<end, 1 based, fully closed)
   while (fgets(line, 100, frags)) {
     sscanf(line, "%d %*d %s %d %d\n", &img.index, fragname, &img.frag.lb, &img.frag.rb);
     pos = GetSeqIndex(0, seq_no-1, fragname);
@@ -306,54 +333,74 @@ void ele_def(int method, FILE *frags, float cutoff, EPROT_t **all_epp, int *ecp,
       fflush(img_prot);
       continue;
     }
-    if (ele_frag.seq_name == img.frag.seq_name /*!strncmp(ele_frag.seq_name, img.frag.seq_name, NAME_LEN)*/ && ele_frag.rb - img.frag.lb > 10) { /* checking possible images */
+    // Checking if sequences overlap by more than 10bp
+    //
+    //       lb|--ele_frag--|rb
+    //                  lb|--img.frag--|rb
+    //
+    //   ( NOTE: This is a pointer comparison rather than
+    //   a string comparison -- be safe out there )
+    //   TODO: This should probably be a parameter!
+    if ( ele_frag.seq_name == img.frag.seq_name &&
+         ele_frag.rb - img.frag.lb > 10 ) {
+      // Overlaps by more than 10bp
       if (method == 1) {cov = sing_cov(&ele_frag, &img.frag, cutoff);}
       else {cov = doub_cov(&ele_frag, &img.frag, cutoff);}
-      if (cov) { /* a good image */
-	/* include the current frag in the current element*/
+      if (cov) {
+	// A good image; include it in the current element
 	img_ct ++;
 	if (img.index%2) {
+          // Odd indices originate from the subject range of an MSP
 	  (*(all_mprot+img.index/2))->se = (*ecp);
 	} else {
+          // Even indices originate from the query range of an MSP
 	  (*(all_mprot+img.index/2))->pe = (*ecp);
 	}
 	fprintf(img_prot, "%d %d\n", (*ecp), img.index);
 	fflush(img_prot);
-     	/* updating definition of the element if necessary */
-	/* notice that it is a bit complicated than above */
-	if (ele_frag.rb < img.frag.rb) { 
+        // If we find an image which is longer than the current
+        // element range, update the element endpoint and reconsider
+        // if previous unqualified images are now able to participate
+        // in this element.
+	if (ele_frag.rb < img.frag.rb) {
+          // Update the endpoint
 	  ele_frag.rb = img.frag.rb;
-	  /* time to go back and check if previously unqualified images are now good to be participated to the updated element */
 	  cur = remain;
 	  prev = NULL;
 	  while (cur) {
 	    INCLUDE_IMAGE;
 	  }
 	}
-      } else { /* current image not good for the current ele, keep it in the remaining list and move on */
-	/*printf("1st backing up\n");*/
-	BACK_UP;
+      } else {
+        // Current image is not good for the current ele, keep it in the remaining
+        // list and move on
+	SAVE_IMG_TO_REMAINING_LIST;
       }
     } else { /* time to finish defining of ele_tmp */
       /* output the element */
-      ADD_EP;
-      /*printf("2nd backing up\n");*/
-      BACK_UP;
+      SAVE_ELEMENT_TO_EP_LIST;
+      SAVE_IMG_TO_REMAINING_LIST;
       /* start a new element, finish the remain list */
       ritetime = 1;
       /* if (remain) printf("2nd look back\n");
 	 else printf("no need for 2nd look back\n"); */
+      //
       while (remain && ritetime) {
 	cur = remain;
-	RITE_THING;
+	INIT_ELEMENT_FROM_REMAIN_LIST;
+        // cur points to remain list at this point.  If
+        // there are still more "remaining" try to include
+        // them first.
 	while (cur) {
-	  DO_IT;
+          // Special inline for including or closing out
+          // element completely from the remaining list.
+	  EVALUATE_REMAINING_IMAGE;
 	}
       }
     }
   }
 
-  ADD_EP;
+  SAVE_ELEMENT_TO_EP_LIST;
   if (remain) ritetime = 1;
 
   /* add the last element to the list of elements */
@@ -365,13 +412,13 @@ void ele_def(int method, FILE *frags, float cutoff, EPROT_t **all_epp, int *ecp,
 
     while (cur) {
       if (ritetime) {
-	RITE_THING;
-	continue;	
+	INIT_ELEMENT_FROM_REMAIN_LIST;
+	continue;
       }
-      DO_IT;
+      EVALUATE_REMAINING_IMAGE;
     }
     if (!cur) {
-      ADD_EP;
+      SAVE_ELEMENT_TO_EP_LIST;
       ritetime = 1;
     }
   }
@@ -383,6 +430,7 @@ void ele_def(int method, FILE *frags, float cutoff, EPROT_t **all_epp, int *ecp,
 
 
 
+// RMH: Load MSP referenced by image structure entry
 void img_charge(IPROT_t **shadow, int ct, FILE *input) {
   int i=0, pos=0;
   char line[151];
@@ -418,9 +466,6 @@ void img_charge(IPROT_t **shadow, int ct, FILE *input) {
   }
   rewind(input);
 }
-
-
-
 
 
 int index_cmp(const void *i1, const void *i2) {

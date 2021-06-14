@@ -1,11 +1,7 @@
 #include "msps.h"
 
-
 #define SIZE_LIMIT 500
 #define TANDEM 5
-
-
-
 
 typedef struct cp_list {
   int32_t cp;
