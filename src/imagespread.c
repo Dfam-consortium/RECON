@@ -1,4 +1,5 @@
 
+#include "seqlist.h"
 #include "msps.h"
 
 

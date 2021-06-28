@@ -1,7 +1,10 @@
+#ifndef __MSPS_H__
+#define __MSPS_H__
+
 /* standard stuff */
 
+#include "msps.h"
 #include "bolts.h"
-#include "seqlist.h"
 
 /* A collection of structures and functions to handle MSPs */
 
@@ -53,10 +56,6 @@ typedef struct msp_list {
   MSP_t *to_msp;
   struct msp_list *next;
 } MSP_DATA_t;
-
-
-
-
 
 
 
@@ -227,3 +226,5 @@ int doub_cov(FRAG_t *f1, FRAG_t *f2, float cutoff) {
   }
   return 0;
 }
+
+#endif
