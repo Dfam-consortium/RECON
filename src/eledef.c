@@ -11,6 +11,7 @@
  *    or 0.9 (method 2, double coverage).
  *      - This is the cutoff for fractional overlap between images.
  */
+#include "seqlist.h"
 #include "msps.h"
 #define IMG_CAP 500000
 

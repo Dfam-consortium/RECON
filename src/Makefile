@@ -60,12 +60,11 @@ MANSRC=
 
 DOCS =  
 
-HDRS =  bolts.h seqlist.h msps.h ele.h
+HDRS =  bolts.h seqlist.h msps.h ele.h treeview.h
 
 MAIN =  
 
-SRC =   imagespread.c eledef.c eleredef.c edgeredef.c famdef.c
-
+SRC =   imagespread.c eledef.c eleredef.c edgeredef.c famdef.c 
 
 OBJ =   
 
@@ -108,16 +107,7 @@ dist:
 test:   
 	(cd Testsuite; testsuite.sh)
 
-lint:
-	lint -h -I$(SQUIDDIR) $(RFLAGS) $(MAIN) $(SRC) $(SQUIDDIR)/llib-lsquid.ln /usr/lib/lint/llib-lm.ln
-
 .c.o:
-	$(CC) $(CFLAGS) $(MDEFS) -I$(SQUIDDIR) -c $<		
-
-.m.o:
-	$(CC) $(CFLAGS) $(MDEFS) -I$(SQUIDDIR) -c $<
-
-
-
+	$(CC) $(CFLAGS) $(MDEFS) -c $< -o $*.o		
 
 

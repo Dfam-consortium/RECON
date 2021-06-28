@@ -1,25 +1,21 @@
 /*
-The below routine prints tree in ascii for a given Tree representation which contains list of nodes, and node structure is this
+ * treeview : Auxiliary routines for printing a IMG_NODE_t datastructure
+ *
+ * Adapted from the implementation documented originally on a blog at openasthra.com:
+ *
+ *    http://web.archive.org/web/20090617110918/http://www.openasthra.com/c-tidbits/printing-binary-trees-in-ascii/
+ *
+ * For now this is implemented completely as a self contained header file.
+ *
+ * -RMH
+ */
+#ifndef __TREEVIEW_H__
+#define __TREEVIEW_H__
 
-    struct Tree
-    {
-      Tree * left, * right;
-      int element;
-    };
 
-This pic illustrates what the below routine does on canvas..
-ascii tree
+#include "msps.h"
+#include "eleredef.h"
 
-Here is the printing routine..
-
-  http://web.archive.org/web/20090617110918/http://www.openasthra.com/c-tidbits/printing-binary-trees-in-ascii/
-
-Auxiliary routines..
-*/
-
-//#include <stdio.h>
-//#include <stdlib.h>
-//#include <string.h>
 
 #define MAX_HEIGHT 1000
 #define INFIN (1<<20)
@@ -56,8 +52,6 @@ void compute_rprofile(int *rprofile, asciinode *node, int x, int y);
 int MIN (int X, int Y);
 int MAX (int X, int Y);
 
-
-////////////////////////////////////
 
 //prints ascii tree for given Tree structure
 void print_ascii_tree(IMG_NODE_t * t)
@@ -317,5 +311,4 @@ void compute_edge_lengths(int gap, int *lprofile, int *rprofile, asciinode *node
       compute_rprofile(rprofile, node->right, x+node->edge_length+1, y+node->edge_length+1);
     }
 
-
-
+#endif

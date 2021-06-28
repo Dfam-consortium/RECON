@@ -1,4 +1,5 @@
 #include "ele.h"
+#include "seqlist.h"
 
 
 typedef struct Dirs {

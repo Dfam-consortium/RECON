@@ -1,9 +1,8 @@
+#ifndef __SEQLIST_H__
+#define __SEQLIST_H__
 
 #include "bolts.h"
 #include "string.h"
-
-#ifndef _seqlist_h
-#define _seqlist_h
 
 void GetSeqNames(FILE *);
 int GetSeqIndex(int, int, char *);

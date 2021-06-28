@@ -24,6 +24,7 @@
 
 #include "ele.h"
 #include "eleredef.h"
+#include "seqlist.h"
 #include "treeview.h"
 
 #define CUTOFF1 0.5
