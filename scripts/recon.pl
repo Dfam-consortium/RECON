@@ -17,6 +17,7 @@ open(MSP, "$ARGV[1]") || die "usage: recon seq_name_list_file MSP_file integer\n
 close MSP;
 
 
+
 `rm -f core`;
 
 `rm -rf summary`;
@@ -29,7 +30,7 @@ close MSP;
 `rm -rf images`;
 `mkdir images`;
 
-`$path/imagespread $ARGV[0] $ARGV[1] $ARGV[2]`;
+system("$path/imagespread $ARGV[0] $ARGV[1] $ARGV[2]");
 
 if ($?) {die "imagespread failed. Exit code $?\n";}
 
@@ -41,7 +42,7 @@ if (@ARGV < 3) {
 
 for ($i=1; $i<=$sect; $i++) {
    $spread = "images/spread" . $i;   
-   `sort -k 3,3 -k 4n,4n -k 5nr,5nr $spread >> images/images_sorted`;
+   system("sort -k 3,3 -k 4n,4n -k 5nr,5nr $spread >> images/images_sorted");
    if ($?) {die "sort failed for $spread.\n";}
 }
 
@@ -54,7 +55,7 @@ for ($i=1; $i<=$sect; $i++) {
 `rm -rf ele_def_res`;
 `mkdir ele_def_res`;
 
-`$path/eledef $ARGV[0] $ARGV[1] single`;
+system("$path/eledef $ARGV[0] $ARGV[1] single");
 if ($?) {die "eledef failed. Exit code $?\n";}
 
 
@@ -68,7 +69,7 @@ if ($?) {die "eledef failed. Exit code $?\n";}
 `ln -s ele_def_res tmp`;
 `ln -s ele_redef_res tmp2`;
 
-`$path/eleredef $ARGV[0]`;
+system("$path/eleredef $ARGV[0]");
 if ($?) {die "eleredef failed. Exit code $?\n";}
 
 `rm -f tmp tmp2`;
@@ -84,7 +85,7 @@ if ($?) {die "eleredef failed. Exit code $?\n";}
 `ln -s ele_redef_res tmp`;
 `ln -s edge_redef_res tmp2`;
 
-`$path/edgeredef $ARGV[0]`;
+system("$path/edgeredef $ARGV[0]");
 if ($?) {die "edgeredef failed. Exit code $?\n";}
 
 
@@ -94,7 +95,7 @@ if ($?) {die "edgeredef failed. Exit code $?\n";}
 `rm -f tmp tmp2`;
 `ln -s edge_redef_res tmp`;
 
-`$path/famdef $ARGV[0]`;
+system("$path/famdef $ARGV[0]");
 if ($?) {die "famdef failed. Exit code $?\n";}
 
 `rm -f tmp`;
