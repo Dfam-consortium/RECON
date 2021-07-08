@@ -104,14 +104,14 @@ int main (int argc, char *argv[]) {
   for (i=0; i<ele_ct; i++) {
     if ((*(all_ele+i))->stat != 'O' && (*(all_ele+i))->stat != 'X') {
       fprintf(log_file, "evaluating family membership of element %d\n", (*(all_ele+i))->index);
-      fflush(log_file);
+      //fflush(log_file);
       if ((*(all_ele+i))->stat == 'y')	{ /* starting a new family! */
 	family = new_family();
 	build_family(family, *(all_ele+i), 1, &tot_ele);
       } else if ((*(all_ele+i))->stat != 'x') {
 	err_no ++;
 	fprintf(log_file, "ele %d %c not properly filtered\n",  (*(all_ele+i))->index, (*(all_ele+i))->stat);
-	fflush(log_file);
+	//fflush(log_file);
 	exit(5);
       }
     }
@@ -126,7 +126,7 @@ int main (int argc, char *argv[]) {
   fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d files read, %d msps seen, %d edges seen\n", files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
-  fflush(log_file);
+  //fflush(log_file);
   fclose(log_file);
 
 
@@ -196,7 +196,7 @@ void build_family(FAMILY_t *fam, ELE_INFO_t *ele_info, short dir, int *te) {
     cei = cur_mem->ele_info;
     if (cei->ele) {
       fprintf(log_file, "ele %d is in memory unexpectedly\n", cei->index);
-      fflush(log_file);
+      //fflush(log_file);
       exit(3);
     } else ele_read_in(cei, 4);
 
@@ -211,7 +211,7 @@ void build_family(FAMILY_t *fam, ELE_INFO_t *ele_info, short dir, int *te) {
     if (cei->ele->edges) recruit_partner(cei, cei->ele->edges, &mem_tail, cur_dir, &dirs_t);
     else if (cur_mem != seed) {
       fprintf(log_file, "error: ele %d edge tree missing\n", cei->index);
-      fflush(log_file);
+      //fflush(log_file);
       exit(4);
     }
     ele_cleanup(&cei->ele);
@@ -225,7 +225,7 @@ void build_family(FAMILY_t *fam, ELE_INFO_t *ele_info, short dir, int *te) {
   *te += mem_ct;
 
   fprintf(log_file, "new family with %d members\n", mem_ct);
-  fflush(log_file);
+  //fflush(log_file);
 
   fam_cleanup(&fam);
 }

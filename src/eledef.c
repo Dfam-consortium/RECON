@@ -1,3 +1,7 @@
+/* 
+  ecp = element index
+ */
+
 /*
  * eledef.c
  *
@@ -21,6 +25,10 @@
  *   program execution.
  */
 // Re-evaluate orphan images (remain list) after an element boundary has been extended
+// 1. Evaluate for single or double (should only be single in this call), increase img_ct
+// 2. determine %2 and set that to the element index to account for each image being doubled.
+// 3. Write image index and element count to img_prot
+// 4. Update counters and clear memory
 #define INCLUDE_IMAGE 	    if (method == 1) {cov=sing_cov(&ele_frag, &cur->to_image->frag, cutoff);}\
             else {cov=doub_cov(&ele_frag, &cur->to_image->frag, cutoff);}\
             if (cov) {\
@@ -53,6 +61,8 @@
 	    }
 
 // Save element to EP linked list
+// Used when you hit a boundary, create a temp structure and set pointers 
+// Record element index, seq name, and fragment boundaries in all_ele
 #define SAVE_ELEMENT_TO_EP_LIST      ep_tmp = (EPROT_t *) malloc(sizeof(EPROT_t));\
       ep_tmp->flag = 0;\
       ep_tmp->index = (*ecp);\
@@ -65,6 +75,9 @@
       fprintf(all_ele, "%d %s %d %d\n", (*ecp), ele_frag.seq_name, ele_frag.lb, ele_frag.rb)
 
 // Initialize new element using first image from remain list
+// 2. determine %2 and set that to the element index to account for each image being doubled.
+// 3. Write image index and element count to img_prot
+// 4. Update counters and clear memory
 #define INIT_ELEMENT_FROM_REMAIN_LIST	ritetime = 0;\
 	(*ecp) ++;\
         img_ct = 1;\
@@ -173,17 +186,19 @@ int main (int argc, char *argv[]) {
   }
 
   seq_list = fopen(argv[1], "r");
+/*  Already Checked in imagespread -KN
   if (!seq_list) {
     printf("Input file for sequence name list %s not found.  Exit.\n", argv[1]);
     exit(2);
-  }
+  } */
   GetSeqNames(seq_list);
 
   msp_file = fopen(argv[2], "r");
-  if (!msp_file) {
+/* Already Checked in imagespread -KN
+   if (!msp_file) {
     printf("Input file of MSPs %s not found.  Exit.\n", argv[2]);
     exit(2);
-  }
+  } */
 
   if (!strcmp(argv[3], m1)) {method = 1;}
   else if (!strcmp(argv[3], m2)) {method = 2;}
@@ -204,20 +219,29 @@ int main (int argc, char *argv[]) {
     printf("Can not open the fragment list file, exiting.\n");
     exit(1);
   }
+
+
   if (!(msp_no = fopen("summary/ori_msp_no", "r"))) {
     printf("Can not open msp_no, exiting.\n");
     exit(1);
   }
+  // error tracker -kn
   err = fopen("ele_def_res/errors", "w");
+  // lists element number seq identifier and L/R frag endpoints for each img in the element
   all_ele = fopen("summary/naive_eles", "w");
+  // Lists the id for all imgs per element -kn
   img_prot = fopen("ele_def_res/img_prot", "w");
+  // Total number of elements from first search -kn
   ele_no = fopen("summary/naive_ele_no", "w");
+  //Captures the total number of elements + # of imgs per element from first search -KN
   size_list = fopen("ele_def_res/size_list", "w");
 
+  // first # of msps -kn
   while(fgets(line, 100, msp_no)) {
     msp_ct = atoi(line);
   }
 
+//Create structures -kn
   all_mprot = (MPROT_t **) malloc(msp_ct*sizeof(MPROT_t *));
   for (i=0; i<msp_ct; i++) {
     *(all_mprot+i) = (MPROT_t *) malloc(sizeof(MPROT_t));
@@ -265,14 +289,14 @@ int main (int argc, char *argv[]) {
     iprot_ct ++;
     // Do something if we reach our structure capacity
     if (iprot_ct == IMG_CAP) {
-      DUMBBELL;
+      DUMBBELL; //Print out everything from the buffer -kn
       iprot_ct = 0;
     }
   }
 
   if (iprot_ct) {
     for (i=0; i<iprot_ct; i++) {*(iprot_shadow+i) = *(all_iprot+i);}
-    DUMBBELL;
+    DUMBBELL; //update files, clear buffer -kn
   }
 
   /* cleaning up */
@@ -319,7 +343,7 @@ void ele_def(int method, FILE *frags, float cutoff, EPROT_t **all_epp, int *ecp,
     sscanf(line, "%d %*d %s %d %d\n", &img.index, fragname, &img.frag.lb, &img.frag.rb);
     pos = GetSeqIndex(0, seq_no-1, fragname);
     img.frag.seq_name = *(seq_names+pos);
-
+    printf(img.frag.seq_name, "seqname.\n");
     if (ritetime) { /* starting a new element */
       ritetime = 0;
       (*ecp) ++;
@@ -467,7 +491,9 @@ void img_charge(IPROT_t **shadow, int ct, FILE *input) {
   }
   rewind(input);
 }
-
+/* 
+  Helper function in sorting images based on index
+ */
 
 int index_cmp(const void *i1, const void *i2) {
   return (*((IPROT_t **) i1))->index - (*((IPROT_t **) i2))->index;

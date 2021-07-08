@@ -97,3 +97,5 @@ int GetOutputInterval(char *seq_name, int seq_no, int noof) {
 
   return interval;
 }
+
+// Typical Use Case: only one output file needed -KN 

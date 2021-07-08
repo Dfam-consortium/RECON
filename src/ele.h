@@ -69,7 +69,17 @@ typedef struct family {
   ELE_DATA_t *members;
   struct fam_list *relatives;
 } FAMILY_t;
-
+/*
+family
+ |
+ |---index
+ |
+ |---name
+ |
+ |---members
+ |
+ |---relatives
+*/
 typedef struct fam_list {
   struct family *to_family;
   struct fam_list *next;

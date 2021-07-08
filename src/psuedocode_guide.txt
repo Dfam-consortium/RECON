@@ -1,0 +1,206 @@
+1. Obtain pairwise local alignments between the input sequences.
+done in imagespread.c
+2. Define elements from the obtained alignments:
+        a. Elements are first defined using the single coverage
+        method, as described in Step 2 of the existing algorithm.
+        in pseudocode
+            From eledef.c 
+                void ele_def() {
+    
+                while (length of the fragments) {
+                    if ( No curr element) { /* starting a new element */
+                    (*ecp) ++;
+                    img_ct = 1;
+                    ele_frag = img.frag; /* start the definition of the element */
+                    if (img.index%2) {
+                        set se to ecp if img index is even
+                    } 
+                    else {
+                        set pe to ecp if img index is odd
+                    }
+                    print the results
+                    clear the buffer
+
+                    continue;
+                    }
+
+                    if ( seqname is the same and have an overlap > 10) {
+                        
+                    cov = sing_cov(&ele_frag, &img.frag, cutoff);
+                    if (there is a good image) {
+                        add to the current element                            
+                    if (img.index%2) {
+                        odd indeces are set to ecp
+                    } else {
+                        even indeces are set to ecp
+                    }
+                    print the results & clear the buffer
+
+                    if (img is longer than current element range) {
+                        Update the endpoint
+                        re run to determine if there are previous unqualified images are now able to participate in this element.
+
+                    while (cur) {
+                        INCLUDE_IMAGE;
+                    }
+                    }
+                    } else {
+                        Current image is not good for the current ele, keep it in the remaining list and move on
+                    SAVE_IMG_TO_REMAINING_LIST;
+                    }
+                    } 
+                    
+                    else { 
+                    SAVE_ELEMENT_TO_EP_LIST;
+                    SAVE_IMG_TO_REMAINING_LIST;
+                    start new element
+
+                    while (there is an element and includes more elements "remaining" to be tested) {
+                    
+                    INIT_ELEMENT_FROM_REMAIN_LIST;
+
+                    while (there is more imgs "remaining" to be tested) {
+                    EVALUATE_REMAINING_IMAGE;
+                    }
+                    }
+                    }
+                }
+
+            SAVE_ELEMENT_TO_EP_LIST;
+            if (remain) ritetime = 1;
+
+            /* add the last element to the list of elements */
+            while (remain) {
+                cur = remain;
+                prev = NULL;
+
+                while (cur) {
+                if (ritetime) {
+                INIT_ELEMENT_FROM_REMAIN_LIST;
+                continue;
+                }
+                EVALUATE_REMAINING_IMAGE;
+                }
+                if (!cur) {
+                SAVE_ELEMENT_TO_EP_LIST;
+                look for the next new element
+                }
+            }
+            Print out results
+            }
+
+        b. Each element defined is reevaluated after the image end
+        selection rule (Fig. 4) 
+        Image end selection rule
+            void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
+            define structures
+
+            seed the network with the first element
+
+            /* breadth first search */
+            while (there is elements in the queue) {
+                clan_size ++;
+                if (que->ele_info->ele->l_hold <= DEPTH) {
+                if (element has only been initialized) look for edges and primaries, set element stat to t
+                if (element has documented edges) recruit other elements
+                /* else {
+                    output errors, flush
+                }*/
+                }
+                que = que->next;
+            }
+            }
+
+        
+        Reevaluated:
+            void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
+                initialize element
+
+                if (element lost all of its images during re-evaluation of partners) {
+                    combine element
+                    remove element from tree, and clean up
+                } else {
+                    redefine current element and its neighbors
+                    output current element and neighbors
+                    clear buffer
+                    set up local network
+
+                    output results and clear buffer 
+
+                    build local network 
+
+                    output results to log and clear buffer
+
+                    redefine local network
+
+                    search local network 
+
+                    clear buffer, clear up and dissolve local network
+                }
+        and the element reevaluate and update procedure (Fig. 3).
+
+        c. If an element defined is considered composite and is
+        split, elements forming alignments with the composite
+        element will be reevaluated. The process continues until
+        all definitions of elements stabilize.
+
+3. Group elements defined into families on the basis of their
+sequence similarity:
+        a. Elements and their family relationship are determined
+        and converted to a graph H(V, E) according to the family relationship determination procedure and the graph
+        construction procedure with edge reevaluation (Fig. 5).
+
+
+
+        Edge reevaluation
+            void general_edge_redef(ELE_INFO_t *ele_info) {
+                ELE_DATA_t *local_net=NULL;
+                char *command;
+
+                if (!ele_info->ele) ele_read_in(ele_info, 2);
+
+                if (element has edges) {
+                    build local edge network
+                    cruise local edge network 
+                    dissolve local edge network
+                } else {
+                    set element stat to 'y'
+                    clean up element
+                    release from graph
+                }
+            }
+
+
+        b. Find all connected components of H according to the
+        primary edges constructed. For each connected component, define a family as a set of all elements in the
+        component.
+        /* standard breath first traverse for connected components */
+        void build_family(FAMILY_t *fam, ELE_INFO_t *ele_info, short dir, int *te) {
+  
+            define structures
+
+            set ele_info stat to x
+            set seed
+            set fam members, and memory tail to seed
+            create a directory structure
+
+        while (fam has new members) {
+            increase member count
+            if (current element index contains an element) {
+            output error 
+            exit
+            } else ele_read_in(cei, 4);
+
+            cei->to_family = fam;
+
+            output the element to the list of all elements 
+            if (has edges) recruit_partner();
+            else if (no edges) {
+                output error no edge tree
+            }
+            ele_cleanup(&cei->ele);
+            cur_mem = cur_mem->next;
+            cur_dir = cur_dir->next;
+        }
+        output results, clear buffer and clean family
+        }

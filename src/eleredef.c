@@ -27,7 +27,12 @@
 #include "seqlist.h"
 #include "treeview.h"
 
+// KN: "The cutoff for fractional overlap between images, which is
+// used in the initial inference of syntopy by the single coverage method"
 #define CUTOFF1 0.5
+// KN: "The minimal fraction of alignable sequences between two
+// elements before they are considered to belong the same
+// family"
 #define CUTOFF2 0.9
 #define MAX_IMG 1200
 // RMH: "The minimum length of an element, for example,
@@ -42,7 +47,7 @@
 //       given position used in the element reevaluation
 //       and update procedure."
 #define FUDGE 2
-#define MARGIN 10000
+//#define MARGIN 10000 -kn
 #define FLURRY 10
 
 //typedef struct img_node {
@@ -100,7 +105,7 @@ void add_edge(ELE_INFO_t *, ELE_INFO_t *, char, int32_t, short);
 void adjust_edge_tree(ELE_INFO_t *);
 int charge_edge_array(EDGE_t **, EDGE_TREE_t *, int);
 int consis_tree_build(IMG_NODE_t *, IMAGE_t *, int);
-int print_consis_tree(IMG_NODE_t *rt);
+//int print_consis_tree(IMG_NODE_t *rt); 
 int consis(IMAGE_t *, IMAGE_t *, float);
 IMG_NODE_t **node_entry(IMG_NODE_t **);
 void consis_tree_free(IMG_NODE_t *);
@@ -115,7 +120,7 @@ int frag_cmp(const void *, const void *);
 int partner_cmp(const void *, const void *);
 int CP_cmp(const void *, const void *);
 int BD_cmp(const void *, const void *);
-int fam_cmp(const void *, const void *);
+//int fam_cmp(const void *, const void *); -kn
 
 int main (int argc, char *argv[]) {
   ELE_INFO_t *cur_ele_info;
@@ -133,10 +138,12 @@ int main (int argc, char *argv[]) {
   }
 
   seq_list = fopen(argv[1], "r");
+/* Already called
   if (!seq_list) {
     printf("Input file for sequence name list %s not found.  Exit.\n", argv[1]);
     exit(2);
-  }
+
+  } */
   GetSeqNames(seq_list);
 
   if (argc > 2) start = atoi(argv[2]) - 1;
@@ -172,12 +179,13 @@ int main (int argc, char *argv[]) {
     printf("Can not open summary/new_msps for writing! Exiting\n");
     exit(1);
   }
-  unproc = fopen("summary/unproc", "a");
+  // not used -kn
+  /* unproc = fopen("summary/unproc", "a");
   if ( !unproc )
   {
     printf("Can not open summary/unproc for writing! Exiting\n");
     exit(1);
-  }
+  } */
   combo = fopen("summary/combo", "a");
   if ( !combo )
   {
@@ -196,17 +204,19 @@ int main (int argc, char *argv[]) {
     printf("Can not open tmp2/log for writing! Exiting\n");
     exit(1);
   }
-
+// Transfer ele_no into a local variable (ele_ct)-kn
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);
   }
   fclose(ele_no);
-
+//transfer msp_no into a local variable (msp_np) -kn
   while (fgets(line, 15, msp_no)) {
     msp_index = atoi(line) - 1;
   }
   fclose(msp_no);
 
+
+// Transfer edge_no into a local variable, unclear why edge_index = -1 rather than just exiting if it does not exist ? -kn
   if (edge_no) {
     while (fgets(line, 15, edge_no)) {
       edge_index = atoi(line) - 1;
@@ -225,8 +235,9 @@ int main (int argc, char *argv[]) {
   ele_info_data = NULL;
 
   /* get rid of large tandem reps */
+  //size list not checked ? -kn
   if (size_list && !new_stat) outthrow_big_tandems(size_list);
-  fclose(unproc);
+ // fclose(unproc);
 
   /* set file_updated / stat for ele_info's */
   // RMH: This is not used in the normal workflow at
@@ -255,7 +266,7 @@ int main (int argc, char *argv[]) {
       }
     }
   }
-
+//set total and in_mem counters for summary reporting -kn
   msp_in_mem = 0;
   msp_left = 0;
   msp_ct = 0;
@@ -267,13 +278,13 @@ int main (int argc, char *argv[]) {
 
   /* re-define elements using the syntopy algorithm, and build edges */
   img_ptr = (IMAGE_t **) malloc(MAX_IMG*sizeof(IMAGE_t *));
-
+// check if img_ptr build failed -kn
   if ( ! img_ptr )
   {
     printf("eleredef: Error! Could not allocate memory for img_ptr: %d bytes requested\n", ( MAX_IMG*sizeof(IMAGE_t *) ) );
     exit(-1);
   }
-
+ //used as a counter to ensurre every element gets redefined if applicable -kn
   to_march = 1;
   while (to_march) {
     to_march = 0;
@@ -281,6 +292,7 @@ int main (int argc, char *argv[]) {
     for (i=start; i<ele_ct && i<ele_array_size; i++) {
       fprintf(log_file, "evaluating definition of element %d\n", (*(all_ele+i))->index);
       fflush(log_file);
+      // Check if the element has content -kn
       if ((*(all_ele+i))->stat == 'z' || (*(all_ele+i))->stat == 'w' || (*(all_ele+i))->stat == 't') {
 	to_march = 1;
 	general_ele_redef(*(all_ele+i), img_ptr);
@@ -303,12 +315,15 @@ int main (int argc, char *argv[]) {
 	report_redef_stat();
 #endif
       } /*else if (cur_ele_info->stat == 'O' && !cur_ele_info->file_updated) spit_out_ele(cur_ele_info);*/
+      //move to the next pointer -kn
       cur_ele_info = cur_ele_info->next;
     }
   }
-
+ // updates redef ele ct with final ele sum -kn
   report_cts();
+  // exports first edge ecount, tmp stats, and final msp count -kn
   report_redef_stat();
+  //memory clear -kn
   free(img_ptr);
 
 #if 0
@@ -323,6 +338,7 @@ int main (int argc, char *argv[]) {
   }
 #endif
 
+//summary reporting -kn
   fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d rounds, %d files read, %d msps seen, %d edges seen\n", rounds, files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
@@ -465,6 +481,7 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
       ele_data = ele_data_tmp;
       /*      if (!strncmp(ele_tmp->frag.seq_name, target, NAME_LEN)) printf("%d %s %d %d\n", ele_tmp->index, ele_tmp->frag.seq_name, ele_tmp->frag.lb, ele_tmp->frag.rb); */
       /* time to go back to the head of the remaining list and start a new element */
+      // Marks the time to start the definition of a new element  -kn
       ritetime = 1;
       cur_img_data = *img_data_p;
       prev_img_data = NULL;
@@ -624,7 +641,7 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 
 
 
-
+/*
 #if 0
 void build_local_network(ELE_INFO_t *ele_info, int level, ELE_DATA_t **net_p, IMAGE_t **img_ptr) {
   ELEMENT_t *ele;
@@ -643,7 +660,7 @@ void build_local_network(ELE_INFO_t *ele_info, int level, ELE_DATA_t **net_p, IM
     ele->l_hold = 1;
     clan_core_size ++;
     /*fprintf(log_file, "    %d\n", ele_info->index);
-      fflush(log_file);*/
+      fflush(log_file);
     if (ele_info->stat != 'v') {
       if (ele_info->stat == 'z') edges_and_cps(ele_info, img_ptr);
       level ++;
@@ -662,7 +679,7 @@ void local_net_walk(ELE_INFO_t *ele_info, int level, EDGE_TREE_t *edge_node, ELE
 
   if (edge_node->l) local_net_walk(ele_info, level, edge_node->l, net_p, img_ptr);
 
-  /*if (edge_node->to_edge->type == 'p' || edge_node->to_edge->type == 's') {*/
+  /*if (edge_node->to_edge->type == 'p' || edge_node->to_edge->type == 's') {
     epi = linked_ele(ele_info, edge_node->to_edge);
     if (!epi->ele) ele_read_in(epi, 1);
     if (!epi->ele->l_hold) build_local_network(epi, level, net_p, img_ptr);
@@ -670,16 +687,16 @@ void local_net_walk(ELE_INFO_t *ele_info, int level, EDGE_TREE_t *edge_node, ELE
       epi->ele->l_hold = 1;
       clan_core_size ++;
       /*fprintf(log_file, "    %d\n", epi->index);
-	fflush(log_file);*/
+	fflush(log_file);
       if (epi->stat == 'z') edges_and_cps(epi, img_ptr);
       if (epi->ele->edges) local_net_walk(epi, level+1, epi->ele->edges, net_p, img_ptr);
     }
-  /*}*/
+  /*}
   
   if (edge_node->r) local_net_walk(ele_info, level, edge_node->r, net_p, img_ptr);
 }
 #endif
-
+*/
 
 
 
@@ -988,7 +1005,10 @@ void stage_exit(int code) {
 }
 #endif
 
-
+/* "discard the original definition of the given element, discard
+the split products (new elements and alignments) that are
+shorter than the chosen length cutoff at the beginning,
+and assign alignments to proper new elements." -KN */
 
 void dismiss_element(ELE_INFO_t *ele_info) {
     ELE_DATA_t *new_ele_data;
@@ -1085,6 +1105,13 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	  fflush(log_file);
 	  exit(3);
 	}*/
+  /*
+  Evaluates all possible neighbors for the current element to determine if any's boundary is within 10 bp of the frag -kn
+  */
+/* 
+" Slide a window of the chosen
+length cutoff along the given element." -kn
+ */
 	if (pbd->bd-cur_ele->frag.lb>FLURRY && pbd->bd-cur_ele->frag.rb<-FLURRY) {
 	  to_dissect ++;
 	}
@@ -1099,10 +1126,12 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	  } else if (/*pbd->bd-cur_ele->frag.rb<0 &&*/ pbd->bd-cur_ele->frag.rb>=-FLURRY) {
 	    cur_ele->frag.rb = pbd->bd;
 	  }
+
 	  pbd = pbd->next;
 	}
 	BD_free(&cur_ele->TBD);
-      } else {
+      } 
+      else {
 	/* dissect all images according to the TBDs */
 	dissect(ele_info);
 	/* redefine elements according to the dissected images, if any left */
@@ -1458,8 +1487,8 @@ void dissect(ELE_INFO_t *ele_info) {
       dissected = 0;
       img_partner = partner(cur_img_data->to_image);
       ele_partner = img_partner->ele_info->ele;
-      if (full_length(img_partner, CUTOFF2)){
-        ele_partner->flimg_no --;
+      if (full_length(img_partner, CUTOFF2)){ //test if image is full length > 0.9
+        ele_partner->flimg_no --; //unclear ??? -kn
       }
       tbd_tmp = cur_ele->TBD;
       while (tbd_tmp != NULL) {
@@ -1912,6 +1941,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
      * consistent with each other (look at the consis() function of
      * definition of consistency)
      */
+    //Marks the start of a new element definition -KN
     ritetime = 1;
     for (i=0; i<eff_img_ct; i++) {
       cur_img = *(img_ptr+i);
@@ -1953,8 +1983,13 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	if (!prim_p) {
           // RMH: No full length images found yet
           //      NOTE: Prequal flag is set
+<<<<<<< Updated upstream
           //printf("Adding to tree: e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
 	  consis_tree_build(consis_rt, cur_img, 1);
+=======
+          printf("Adding to tree: e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
+	  //consis_tree_build(consis_rt, cur_img, 1);
+>>>>>>> Stashed changes
           //print_consis_tree(consis_rt);
           //print_ascii_tree(consis_rt);
 	}
@@ -1965,10 +2000,12 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	ritetime = 1;
 	if (img_partner->ele_info->index != epi->index) i --;
 	/* finish the current ele_partner */
-	if (prim_p) {
+	if (prim_p) // If a full length image has been found, update stat -kn
+  {
 	  prim_p->stat = 'p';
 	  prim = 1;
-	} else { /* if no full-length, find partial primary images */
+	} 
+  else { /* if no full-length, find partial primary images */
 	  /*prim = find_prim(consis_rt, CUTOFF2, 0, 0, 0, &max_score, &dir);*/
 	  prim = find_prim(consis_rt->children, CUTOFF2, ele_info->ele->frag.lb, -1, 0, 0, 0, 0, 0, &token_mark, &max_score, &dir);
           if ( prim ) 
@@ -2033,6 +2070,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
  *       results.
  */
 int full_length(IMAGE_t *i, float cutoff) {
+  // Test if the element exists
   if (!i->ele_info->ele) {
     err_no ++;
     fprintf(log_file, "error:  element %d not in memory\n", i->ele_info->index);
@@ -2180,6 +2218,7 @@ int charge_edge_array(EDGE_t **edge_array, EDGE_TREE_t *rt, int pos) {
 
 
 // RMH - debug function to view consistency tree
+/*
 int print_consis_tree(IMG_NODE_t *rt) {
   int level = 0;
   IMG_NODE_t *child_rt;
@@ -2207,6 +2246,7 @@ int print_consis_tree(IMG_NODE_t *rt) {
   }
   return 0;
 }
+*/
 
 // RMH: Insert images into a tree
 //      Unique images ( e.g non overlapping ) get placed on
@@ -2410,6 +2450,8 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t score, int32_t hist, short w
 //       score = 0
 // Making a guess here...but int32_t is probably not adequate in some instances for al1/al2 and probably
 // has caused problems where overflow occurs.
+
+//Return final sum of primary candidates
 int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t efl1, int32_t efl2, int32_t al1, int32_t al2, int32_t score, int *pmarkp, int32_t *sc, short *d) {
   int sum = 0, mark=0;
   int32_t skip1, skip2, len1, len2;
@@ -2459,7 +2501,11 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
 
   if (nd->children) {
     end1 = nd->to_image->frag.rb;
-    if (nd->to_image->to_msp->direction == 1) end2 = ipt->frag.rb;
+    if (nd->to_image->to_msp->direction == 1)  //If direction ==1 then node is positive strand, partner element is negative -kn
+{
+    end2 = ipt->frag.rb;
+}
+
     else end2 = ipt->frag.lb;
     sum += find_prim(nd->children, cutoff, end1, end2, efl1, efl2, al1, al2, score, &mark, sc, d);
   } else { /*last alignment in group*/
@@ -2504,6 +2550,8 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
     // RMH:
     printf("al1=%d al2=%d efl1=%d efl2=%d:  al/ef %f, %f   ef-al %d, %d  ele:%d-%d, ptn:%d-%d\n", al1, al2, efl1, efl2,(1.0*al1/efl1), (1.0*al2/efl2), (efl1-al1), (efl2-al2), nd->to_image->ele_info->ele->frag.lb, nd->to_image->ele_info->ele->frag.rb, ipt->ele_info->ele->frag.lb, ipt->ele_info->ele->frag.rb );
     // RMH: end
+/*     "If n/m is greater than a given threshold, c
+is considered a significant aggregation point." C = 0.9 -kn */
     if ( (1.0*al1/efl1 > cutoff || 1.0*al2/efl2 > cutoff) && (efl1-al1 < 30 || efl2-al2 < 30) ) {
       sum = 1;
       mark = 1;
@@ -2518,13 +2566,15 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
          al1 = 1;
       }
       score = score*2/(al1+al2);
-      if (score > *sc) {
+
+      if (score > *sc) { //testing if score is > max_score (originally set at 0)
 	*sc = score;
 	*d = nd->to_image->to_msp->direction;
       }
     }
   }
   if (mark) {
+    // mark is only ++ when a primary edge is found -kn
       nd->to_image->to_msp->stat  = 'p';
       *pmarkp = 1;
   }
@@ -2544,7 +2594,9 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
  ************************
  ************************/
 
-
+/* 
+used for recording succesfully defined elements in summary/combo -kn
+ */
 
 
 
@@ -2578,7 +2630,9 @@ void combo_output(ELE_INFO_t *ele_info) {
 }
 
 
-
+/* 
+ Used in recording obsolete elements in summary/obsolete -kn
+ */
 
 
 void obs_output(ELE_INFO_t *ele_info) {
@@ -2602,7 +2656,7 @@ void obs_output(ELE_INFO_t *ele_info) {
 
 
 
-void fprint_ele_obs(FILE *fp, ELE_INFO_t *ele_info) {
+/* void fprint_ele_obs(FILE *fp, ELE_INFO_t *ele_info) {
   int i;
   BD_t *cur_bd;
   ELEMENT_t *ele=ele_info->ele;
@@ -2621,7 +2675,7 @@ void fprint_ele_obs(FILE *fp, ELE_INFO_t *ele_info) {
     }
   }
 }
-
+ */
 
 
 
@@ -2638,10 +2692,13 @@ void fprint_ele_obs(FILE *fp, ELE_INFO_t *ele_info) {
 
 
 
-
+/* 
+ Helper function used in sorting images based on fragment differences -kn. 
+ */
 
 int frag_cmp(const void *i1, const void *i2) {
-  int res = (*(IMG_DATA_t **)i1)->to_image->frag.seq_name - (*(IMG_DATA_t **)i2)->to_image->frag.seq_name; /*strncmp((*(IMG_DATA_t **)i1)->to_image->frag.seq_name, (*(IMG_DATA_t **)i2)->to_image->frag.seq_name, NAME_LEN)*/
+  int res = (*(IMG_DATA_t **)i1)->to_image->frag.seq_name - (*(IMG_DATA_t **)i2)->to_image->frag.seq_name;  
+  /*strncmp((*(IMG_DATA_t **)i1)->to_image->frag.seq_name, (*(IMG_DATA_t **)i2)->to_image->frag.seq_name, NAME_LEN) */
   if (res == 0) {
     res = (*(IMG_DATA_t **)i1)->to_image->frag.lb - (*(IMG_DATA_t **)i2)->to_image->frag.lb;
     if (res == 0) {
@@ -2655,7 +2712,7 @@ int frag_cmp(const void *i1, const void *i2) {
 //               msp_direction
 //               left bound
 //               right bound
-//
+// ? def of res -kn
 int partner_cmp(const void *i1, const void *i2) {
   int res = partner(*((IMAGE_t **)i1))->ele_info->index - partner(*((IMAGE_t **)i2))->ele_info->index;
   if (res == 0) {
@@ -2670,17 +2727,22 @@ int partner_cmp(const void *i1, const void *i2) {
   return res;
 }
 
-
+/* 
+Helper function, used in sorting PCPs to eventually mark TBDs
+ */
 int CP_cmp(const void *cp1, const void *cp2) {
   return (*((CP_t **) cp1))->cp - (*((CP_t **) cp2))->cp;
 }
-
+/* 
+Helper function, used in sorting TBDs before being evaluated -kn
+ */
 
 int BD_cmp(const void *bd1, const void *bd2) {
   return (*((BD_t **) bd1))->bd - (*((BD_t **) bd2))->bd;
 }
 
-
+/* -kn
 int fam_cmp(const void *fd1, const void *fd2) {
   return (*((FAM_DATA_t **) fd1))->to_family->index - (*((FAM_DATA_t **) fd2))->to_family->index;
 }
+ */

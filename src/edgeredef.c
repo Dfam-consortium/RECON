@@ -13,7 +13,7 @@ void build_local_edge_net(ELE_INFO_t *, int, ELE_DATA_t **);
 void local_edge_net_walk(ELE_INFO_t *, EDGE_TREE_t *, int, ELE_DATA_t **);
 void cruise_local_edge_net(ELE_DATA_t *);
 void dissolve_local_edge_net(ELE_DATA_t **);
-void stage_exit(int );
+//void stage_exit(int ); -kn
 void edge_filt(ELE_INFO_t *);
 EDGE_TREE_t *find_PPS(ELE_INFO_t *, EDGE_TREE_t *);
 EDGE_TREE_t * edge_update(ELE_INFO_t *, EDGE_TREE_t *, EDGE_TREE_t *);
@@ -37,10 +37,11 @@ int main (int argc, char *argv[]) {
   }
 
   seq_list = fopen(argv[1], "r");
-  if (!seq_list) {
+/* repeat -kn 
+ if (!seq_list) {
     printf("Input file for sequence name list %s not found.  Exit.\n", argv[1]);
     exit(2);
-  }
+  } */
   GetSeqNames(seq_list);
 
   if (argc > 2) start = atoi(argv[2]) - 1;
@@ -357,7 +358,8 @@ void dissolve_local_edge_net(ELE_DATA_t **net_p) {
 
 
 
-void stage_exit(int code) {
+/* No longer called -KN
+ void stage_exit(int code) {
   char *command = (char *) malloc(50*sizeof(char));
 
   sprintf(command, "mv -f tmp2/redef_stat tmp2/redef_stat_prev");
@@ -369,14 +371,14 @@ void stage_exit(int code) {
 
   report_redef_stat();
   exit(code);
-}
+} */
 
 
 
 
 void edge_filt(ELE_INFO_t *ele_info) {
   EDGE_TREE_t *max;
-
+ 
   max = find_PPS(ele_info, ele_info->ele->edges);
 
   if (max) {
@@ -385,7 +387,7 @@ void edge_filt(ELE_INFO_t *ele_info) {
   }
 }
 
-
+// "a primary edge is constructed between the two corresponding vertices;"
 
 EDGE_TREE_t *find_PPS(ELE_INFO_t *ele_info, EDGE_TREE_t *rt) {
   ELE_INFO_t *epi;
@@ -393,6 +395,8 @@ EDGE_TREE_t *find_PPS(ELE_INFO_t *ele_info, EDGE_TREE_t *rt) {
 
   if (rt->to_edge->type == 'p' || rt->to_edge->type == 'S') {
     epi = linked_ele(ele_info, rt->to_edge);
+    // "If the alignable length is longer than a certain fraction of
+//the length of either element, the two elements are considered to belong to the same family. Otherwise, they are not."
     if (((float) ele_info->ele->frag.rb - ele_info->ele->frag.lb)/(epi->ele->frag.rb - epi->ele->frag.lb) < CUTOFF3) res = rt;
   }
 
@@ -404,7 +408,10 @@ EDGE_TREE_t *find_PPS(ELE_INFO_t *ele_info, EDGE_TREE_t *rt) {
 
 
 
-
+//"if two
+// elements form significant alignments but do not belong to
+// the same family, a secondary edge is constructed between
+// the two; "  PRIMARY EDGES MUST HAVE SIMILARITY > 0.7-KN
 EDGE_TREE_t *edge_update(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, EDGE_TREE_t *ref) {
   ELE_INFO_t *epi;
 
