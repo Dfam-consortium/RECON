@@ -118,7 +118,7 @@
 	}\
 	tail = tmp
 
-#define DUMBBELL      img_charge(iprot_shadow, iprot_ct, msp_file);\
+#define DUMBBELL      (iprot_shadow, iprot_ct, msp_file);\
       for (i=0; i<iprot_ct; i++) {\
 	if ((*(all_iprot+i))->index%2) {\
 	  partner_index = (*(all_mprot+(*(all_iprot+i))->index/2))->pe;\

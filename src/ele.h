@@ -61,7 +61,64 @@ typedef struct ele_list {
   struct ele_info *ele_info;
   struct ele_list *next;
 } ELE_DATA_t;
-
+/* 
+ele_list
+  |
+  |---ele_info
+         |---index
+         |---ele
+            |---index
+            |---frag
+            |---direction
+            |---update
+            |---l_hold
+            |---img_no
+            |---flimg_no
+            |---edge_no
+            |---to_img_tree
+            |---to_img_data
+            |---edges
+              |---*to_edge
+                |---  index;
+                |--- type
+                |---direction
+                |---score
+                |---ele1_info
+                  |---index;
+                  |---ele
+                  |---stat
+                  |---file_updated
+                  |---to_family
+                  |--next
+                |---ele2_info
+                  |---index;
+                  |---ele
+                  |---stat
+                  |---file_updated
+                  |---to_family
+                  |--next
+              |--- *p, *l, *r
+            |---PCP
+              |---cp;
+              |---contributor
+              |---next;
+            |---TBD
+              |---int32_t bd;
+              |---int support;
+              |---next;
+            |---redef
+                |---ele_info
+                |---next(pointer)
+         |---stat
+         |---file_updated
+         |---to_family
+            |---index
+            |---name
+            |---members
+            |---relatives
+         |---next(pointer to next ele_info)
+  |---next
+ */
 
 typedef struct family {
   int index;

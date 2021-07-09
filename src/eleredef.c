@@ -12,7 +12,8 @@
  *   Element info stat:  'z', 't', 'v', 'w', 'y', 'x' and 'X'
  *      'z' - appears to be initial state
  *      'v' -
- *      'w' -
+ *      'w' - combined, ensures lack of duplicates
+ *      'y' - traversed, no neigbors, child node
  *      't' - set at the end of edges_and_cps()
  *      'X' - appears to indicate deleted or 'dismissed' element
  *      PCP and TBD...need defining
@@ -1983,15 +1984,10 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	if (!prim_p) {
           // RMH: No full length images found yet
           //      NOTE: Prequal flag is set
-<<<<<<< Updated upstream
-          //printf("Adding to tree: e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
-	  consis_tree_build(consis_rt, cur_img, 1);
-=======
           printf("Adding to tree: e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
 	  //consis_tree_build(consis_rt, cur_img, 1);
->>>>>>> Stashed changes
           //print_consis_tree(consis_rt);
-          //print_ascii_tree(consis_rt);
+          print_ascii_tree(consis_rt);
 	}
       }
       if (img_partner->ele_info->index != epi->index || i == eff_img_ct-1) {
