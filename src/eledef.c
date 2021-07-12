@@ -163,7 +163,7 @@ typedef struct ele_prototype {
 void ele_def(int, FILE *, float, EPROT_t **, int *, MPROT_t **);
 void img_charge(IPROT_t **, int, FILE *);
 int index_cmp(const void *, const void *);
-FILE *msp_no, *all_ele, *img_prot, *ele_no, *err, *size_list;
+FILE *msp_no, *all_ele, *img_prot, *ele_no, *err, *size_list, *timing_log;
 
 
 int main (int argc, char *argv[]) {
@@ -236,6 +236,8 @@ int main (int argc, char *argv[]) {
   //Captures the total number of elements + # of imgs per element from first search -KN
   size_list = fopen("ele_def_res/size_list", "w");
 
+  timing_log = fopen("summary/timing_log", "w+");
+
   // first # of msps -kn
   while(fgets(line, 100, msp_no)) {
     msp_ct = atoi(line);
@@ -263,7 +265,7 @@ int main (int argc, char *argv[]) {
   fclose(msp_no);
   fclose(frags);
   img_prot = fopen("ele_def_res/img_prot", "r");
-
+  fclose(timing_log);
   // Initialize a structure to hold all elements
   ep_array = (EPROT_t **) malloc(ele_ct*sizeof(EPROT_t *));
   ep_tmp = all_ep;
@@ -449,6 +451,8 @@ void ele_def(int method, FILE *frags, float cutoff, EPROT_t **all_epp, int *ecp,
   }
 
   fprintf(ele_no, "%d\n", (*ecp));
+  
+  fprintf(timing_log, "hi \n");
 }
 
 

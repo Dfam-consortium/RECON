@@ -1,6 +1,6 @@
 #include "ele.h"
 #include "seqlist.h"
-
+#include <time.h>
 
 typedef struct Dirs {
   int dir;
@@ -100,7 +100,8 @@ int main (int argc, char *argv[]) {
 
   fprintf(eles, "#  fam    ele   dir  sequence    start     end\n");
   fprintf(fams, "# fam  cp-no name\n");  
-
+  clock_t t;
+  t = clock();
   for (i=0; i<ele_ct; i++) {
     if ((*(all_ele+i))->stat != 'O' && (*(all_ele+i))->stat != 'X') {
       fprintf(log_file, "evaluating family membership of element %d\n", (*(all_ele+i))->index);
@@ -116,14 +117,15 @@ int main (int argc, char *argv[]) {
       }
     }
   }
-
+t= clock()-t;
+double time_taken = ((double)t)/CLOCKS_PER_SEC;
   fprintf(fam_no, "%d\n", fam_ct);
   fclose(fam_no);
 
   fprintf(final_ele_no, "%d\n", tot_ele);
   fclose(final_ele_no);
-
-  fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
+  printf("build family took %f seconds to execute \n", time_taken);
+  fprintf(log_file, "tottal numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d files read, %d msps seen, %d edges seen\n", files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
   //fflush(log_file);
@@ -146,11 +148,6 @@ int main (int argc, char *argv[]) {
  **                                  **
  **************************************
  **************************************/
-
-
-
-
-
 
 FAMILY_t *new_family() {
   FAMILY_t *fam;

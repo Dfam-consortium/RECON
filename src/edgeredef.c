@@ -134,7 +134,7 @@ int main (int argc, char *argv[]) {
     }
   }
 
-  fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
+  fprintf(log_file, "total numbers 123: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d files read, %d msps seen, %d edges seen\n", files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
   fflush(log_file);
