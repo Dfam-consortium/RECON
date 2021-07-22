@@ -1,10 +1,20 @@
-
 #include "seqlist.h"
 #include "msps.h"
-
+#include "minunit.h"
 
 int GetOutputInterval(char *, int, int);
 
+
+// Example MinUnit unit test
+// See https://github.com/siu/minunit for MinUnit docs/examples
+MU_TEST(test_check) {
+  mu_check(1==1);
+}
+
+// Example MinUnit test suite
+MU_TEST_SUITE(test_suite) {
+  MU_RUN_TEST(test_check);
+}
 
 
 int main (int argc, char *argv[]) {
@@ -14,6 +24,13 @@ int main (int argc, char *argv[]) {
   char line[150], output_name[50];
   MSP_t cur;
   int img_ct=-1;
+
+  /* unit test invocation */
+  if ( argc == 2 && strcmp(argv[1],"-t") == 0 ){
+    MU_RUN_SUITE(test_suite);
+    MU_REPORT();
+    return MU_EXIT_CODE;
+  }
 
   /* checking command line */
   if (argc < 3) {

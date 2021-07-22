@@ -11,11 +11,13 @@
  * RMH Notes:
  *   Element info stat:  'z', 't', 'v', 'w', 'y', 'x' and 'X'
  *      'z' - appears to be initial state
- *      'v' -
- *      'w' -
+ *      'v' - I have image-end-selection rule
+ *      'w' - Secondary edges are defined
+ *      'y' - Already been traversed has no neighbors
  *      't' - set at the end of edges_and_cps()
  *      'X' - appears to indicate deleted or 'dismissed' element
  *      PCP and TBD...need defining
+ *          - breakup elements
  *  flimg_no = Full Length Image Number (count)
  */
 #include <fcntl.h>
@@ -700,6 +702,7 @@ void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **
   /* breadth first search */
   while (que) {
     clan_size ++;
+    // RMH: DEPTH currently set in bolts.h to 3
     if (que->ele_info->ele->l_hold <= DEPTH) {
       clan_core_size ++;
       // RMH: edges_and_cps sets ele_info to 't'
@@ -1904,7 +1907,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     //               left bound
     //               right bound
     //      This considers all images from a pair of elements at a
-    //      time.
+    //      time ( sub sort starting from img_ptr and going for eff_img_ct records ).
     qsort(img_ptr, eff_img_ct, sizeof(IMAGE_t *), partner_cmp);
 
     /* recognizing full-length images, and put partial and secondary

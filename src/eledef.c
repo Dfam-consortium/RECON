@@ -141,7 +141,7 @@ typedef struct img_prototype {
 } IPROT_t;
 
 typedef struct ele_prototype {
-  short flag;
+  short flag;                  // flag to indicate if the header of the ele_def_res/e# file has been printed
   int index, img_no;
   FRAG_t frag;
   struct ele_prototype *next;
@@ -225,19 +225,15 @@ int main (int argc, char *argv[]) {
     (*(all_mprot+i))->se = 0;
   }
 
+  // Inital clustering into elements
+  //   Using single linkage ( double is an unused option w/RECON ) clustering
   ele_def(method, frags, cutoff, &all_ep, &ele_ct, all_mprot);
-
-  /*for (i=0; i<msp_ct; i++) {
-    if ((*(all_mprot+i))->pe > ele_ct || (*(all_mprot+i))->se > ele_ct) {
-      printf("not OK\n");
-      exit(1);
-    }
-  }*/
 
   fclose(ele_no);
   fclose(img_prot);
   fclose(msp_no);
   fclose(frags);
+
   img_prot = fopen("ele_def_res/img_prot", "r");
 
   // Initialize a structure to hold all elements
