@@ -124,6 +124,10 @@ int main (int argc, char *argv[]) {
   int i, ele_march, ei, rounds=0, start;
   char line[35], stat;
   short fu, to_march;
+     clock_t start1, r, t, end;
+     double cpu_time_used=0.0; 
+     double ele_defTIME;
+     double dissectTIME;
   IMAGE_t **img_ptr;
   FILE *ele_no, *msp_no, *edge_no, *size_list, *new_stat;
   FILE *seq_list;
@@ -277,6 +281,7 @@ int main (int argc, char *argv[]) {
   }
 
   to_march = 1;
+  start1 = clock();
   while (to_march) {
     to_march = 0;
     rounds ++;
@@ -306,9 +311,16 @@ int main (int argc, char *argv[]) {
 #endif
       } /*else if (cur_ele_info->stat == 'O' && !cur_ele_info->file_updated) spit_out_ele(cur_ele_info);*/
       cur_ele_info = cur_ele_info->next;
+      
+     printf("redeftime 1 %f \n", cpu_time_used);
     }
+      end = clock()-start1;
+       cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
+    printf("redeftime 2 %f \n", cpu_time_used);
   }
 
+     cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
+printf("redeftime 3 %f \n", cpu_time_used);
   report_cts();
   report_redef_stat();
   free(img_ptr);
@@ -328,6 +340,7 @@ int main (int argc, char *argv[]) {
   fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d rounds, %d files read, %d msps seen, %d edges seen\n", rounds, files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
+  printf("General_ele_redef %f , %f , %f \n",cpu_time_used, ele_defTIME, dissectTIME);
   printf("total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   printf("%d rounds, %d files read, %d msps seen, %d edges seen\n", rounds, files_read, msp_ct, edge_ct);
   printf("%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
@@ -385,6 +398,10 @@ void report_redef_stat() {
 
 
 ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
+      clock_t t;
+    t = clock();
+
+
   /* this function assumes that the images are SORTED according to frag_cmp.
      defining elements is in essence partitioning images in the original list.
      cur_img_data marks the current image under inspection;
@@ -495,8 +512,12 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
 	fflush(log_file);
 	exit(2);
     }*/
+        t = clock() - t;
+    double ele_defTIME = ((double)t)/CLOCKS_PER_SEC;
+    printf("eledef time %f", ele_defTIME);
     ele_data_tmp = ele_data_tmp->next;
   }
+
 
   return ele_data;
 }
@@ -1107,11 +1128,15 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	BD_free(&cur_ele->TBD);
       } else {
 	/* dissect all images according to the TBDs */
+    
 	dissect(ele_info);
+   
 	/* redefine elements according to the dissected images, if any left */
 	if (cur_ele->img_no) {
 	  cur_ele->to_img_data = img_data_sort(cur_ele->to_img_data, cur_ele->img_no);
+
 	  cur_ele->redef = ele_def(&cur_ele->to_img_data, CUTOFF1);
+
 	}
 	/* clear unnecessary memory, 'v'->'w' and update CPs for w's */
 	combo_update(ele_info);
@@ -1448,6 +1473,9 @@ void TBD_merge(ELEMENT_t *ele) {
 
 // RMH: Perhaps where splitting occurs?
 void dissect(ELE_INFO_t *ele_info) {
+  printf("hi!!!!! \n");
+    clock_t r;
+    r = clock();
   IMG_DATA_t *cur_img_data, *img_data_tmp, *next;
   MSP_t *msp_tmp, *msp_ori;
   IMAGE_t *img_partner, *target_img, *target_partner;
@@ -1530,9 +1558,14 @@ void dissect(ELE_INFO_t *ele_info) {
 	}
 	tbd_tmp = tbd_tmp->next;
       }
+             r = clock() - r;
+    double dissectTIME = ((double)r)/CLOCKS_PER_SEC;
+printf("dissect time  per img %f, \n", dissectTIME);
       cur_img_data = next;
+
     }
     /* the reason for not generating new elements according to the TBDs and then dissect and partition the images is that there's no gaining in time, it's virtually the same thing */
+
 }
 
 

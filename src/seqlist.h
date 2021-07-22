@@ -1,6 +1,7 @@
 #ifndef __SEQLIST_H__
 #define __SEQLIST_H__
-
+#include <stdio.h>
+#include <ctype.h>
 #include "bolts.h"
 #include "string.h"
 
