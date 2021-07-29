@@ -1,6 +1,6 @@
 #! /usr/bin/perl
 
-$path = "";
+$path = "C:/Users/k8/Documents/GitHub/RECON/bin";
 
 if (!$path) {
     die "Please modifiy this script to specify the path to the binaries.\n";

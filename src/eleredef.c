@@ -284,7 +284,7 @@ int main (int argc, char *argv[]) {
     to_march = 0;
     rounds ++;
     for (i=start; i<ele_ct && i<ele_array_size; i++) {
-      fprintf(log_file, "evaluating definition of element %d\n", (*(all_ele+i))->index);
+      fprintf(log_file, "Evaluating definition of element %d\n", (*(all_ele+i))->index);
       fflush(log_file);
       if ((*(all_ele+i))->stat == 'z' || (*(all_ele+i))->stat == 'w' || (*(all_ele+i))->stat == 't') {
 	to_march = 1;
@@ -310,15 +310,15 @@ int main (int argc, char *argv[]) {
       } /*else if (cur_ele_info->stat == 'O' && !cur_ele_info->file_updated) spit_out_ele(cur_ele_info);*/
       cur_ele_info = cur_ele_info->next;
 
-     printf("redeftime 1 %f \n", cpu_time_used);
+    // printf("redeftime 1 %f \n", cpu_time_used);
     }
       end = clock()-start1;
        cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
-    printf("redeftime 2 %f \n", cpu_time_used);
+  //  printf("redeftime 2 %f \n", cpu_time_used);
   }
 
      cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
-printf("redeftime 3 %f \n", cpu_time_used);
+//printf("redeftime 3 %f \n", cpu_time_used);
   report_cts();
   report_redef_stat();
   free(img_ptr);
@@ -396,6 +396,7 @@ void report_redef_stat() {
 
 
 ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
+
       clock_t t;
     t = clock();
 
@@ -512,7 +513,7 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
     }*/
         t = clock() - t;
     double ele_defTIME = ((double)t)/CLOCKS_PER_SEC;
-    printf("eledef time %f", ele_defTIME);
+ //   printf("eledef time %f", ele_defTIME);
     ele_data_tmp = ele_data_tmp->next;
   }
 
@@ -524,6 +525,7 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
 
 
 void generate_img_tree(ELEMENT_t *ele) {
+  printf("generate_img_tree element: %d \n", ele->index);
   IMAGE_t **img_array = (IMAGE_t **) malloc(ele->img_no*sizeof(IMAGE_t *));
   IMG_DATA_t *cur;
   int ct=0;
@@ -572,6 +574,7 @@ void add_ele_info(ELE_INFO_t *ele_info_tmp) {
   else ele_info_tail->next = ele_info_tmp;
 
   ele_info_tail = ele_info_tmp;
+
 }
 
 
@@ -587,7 +590,7 @@ void add_ele_info(ELE_INFO_t *ele_info_tmp) {
  ***********************************/
 
 
-
+;
 
 /**********************************************
  * Organizing the traverse of the local graph *
@@ -599,8 +602,8 @@ void add_ele_info(ELE_INFO_t *ele_info_tmp) {
 
 void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
   ELE_DATA_t *local_net=NULL, *local_net_tail=NULL;
-
   // Read in stage 1 element from "e#" ( where # is ele_info->index ).
+  printf("general_ele_redef: %d\n",ele_info->index);
   if (!ele_info->ele) ele_read_in(ele_info, 1);
   //RMH
   //  status still 'z', but file_updated is now 1
@@ -625,13 +628,14 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     clan_ct ++;
     clan_size = 0;
     clan_core_size = 0;
+
     fprintf(log_file, "new clan: %d for ele %d\n", clan_ct, ele_info->index);
     fflush(log_file);
     build_local_network(ele_info, &local_net, &local_net_tail, img_ptr);
     //if ( ele_info->index == 362 || ele_info->index == 10 )
     //{
     //  printf("Printing local net for 362\n");
-    //  print_ele_data( local_net );
+   //print_ele_data( local_net );
     //}
     fprintf(log_file, "clan size: %d, clan core size: %d\n", clan_size, clan_core_size);
     fflush(log_file);
@@ -651,7 +655,7 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
   ELEMENT_t *ele;
   ELE_DATA_t *que;
-
+  printf("build local network: %d\n", ele_info->index);
   /* seed the network with the first element */
   que = (ELE_DATA_t *) malloc(sizeof(ELE_DATA_t));
   que->ele_info = ele_info;
@@ -681,10 +685,11 @@ void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **
 void recruit(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
   ELE_INFO_t *epi;
   ELE_DATA_t *member;
-
+  printf("recruit element: %d\n", ele_info->index);
   if (rt->l) recruit(ele_info, rt->l, net_tail_p, img_ptr);
 
   epi = linked_ele(ele_info, rt->to_edge);
+  printf("recruit element epi: %d\n", epi->index);
   if (!epi->ele) ele_read_in(epi, 1);
   if (!epi->ele->l_hold) {
     epi->ele->l_hold = ele_info->ele->l_hold + 1;
@@ -739,6 +744,8 @@ void local_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr, int *march_p) {
 	  } else ele_info->stat = 'v';
 	}
     }
+    printf("element name is: %d \n", ele_info->ele->index);
+   
 }
 
 
@@ -843,6 +850,10 @@ void remove_ele(ELE_INFO_t *ele_info) {
  * Redefining a given element *
  ******************************/
 
+/*
+
+Unless otherwise stated as 'v' elements evaluated under ele_redef do not have a stat -kn
+*/
 
 void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     ELE_DATA_t *new_ele_data;
@@ -851,7 +862,6 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     CP_t *cur;
     short to_dissect=0;
     IMG_DATA_t *cur_img_data;
-
     if (!cur_ele->to_img_data) listify(cur_ele->to_img_tree, &cur_ele->to_img_data);
     cur_ele->to_img_data = img_data_sort(cur_ele->to_img_data, cur_ele->img_no);
 
@@ -859,10 +869,33 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     if (cur_ele->PCP) {
       PCP_to_TBDs(cur_ele);
     }
+    else{
+      printf("the name of the element without a PCP is %d \n", cur_ele->index);
+    }
     if (cur_ele->TBD) {
       TBD_merge(cur_ele);
     }
     if (cur_ele->TBD) {
+#if 0
+      to_dissect = 1;\  
+      if (cur_ele->TBD->bd - cur_ele->frag.lb <= FLURRY || cur_ele->TBD->bd - cur_ele->frag.rb >= -FLURRY) {
+	if (!cur_ele->TBD->next) {
+	  to_dissect = 0;
+	  if (cur_ele->TBD->bd - cur_ele->frag.lb <= FLURRY) cur_ele->frag.lb = cur_ele->TBD->bd;
+	  else cur_ele->frag.rb = cur_ele->TBD->bd;
+	  BD_free(&cur_ele->TBD);
+	} else {
+	  if (cur_ele->TBD->next->bd - cur_ele->frag.rb >= -FLURRY) {
+	    if (!cur_ele->TBD->next->next) {
+	      to_dissect = 0;
+	      cur_ele->frag.lb = cur_ele->TBD->bd;
+	      cur_ele->frag.rb = cur_ele->TBD->next->bd;
+	      BD_free(&cur_ele->TBD);
+	    }
+	  }
+	}
+      }
+#endif
       pbd = cur_ele->TBD;
       while (pbd) {
 	if (pbd->bd-cur_ele->frag.lb>FLURRY && pbd->bd-cur_ele->frag.rb<-FLURRY) {
@@ -924,6 +957,7 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     if (cur_ele->img_no > 0) {
       ele_info->stat = 'v';
     } else if (!to_dissect) combo_update(ele_info);
+    /*img_data_free(&cur_ele->to_img_data);*/
 }
 
 
@@ -961,6 +995,7 @@ IMG_DATA_t *img_data_sort(IMG_DATA_t *img_data, int ct) {
 
 
 void PCP_to_TBDs(ELEMENT_t *ele) {
+      printf("PCP_to_TBD stat 1 %ld %ld \n", ele->index , ele->PCP->contributor->index );
   int s = 0, left;
   BD_t *pbd_tmp, *pbd_prev, *pbd, *pbds;
   CP_t *cp;
@@ -1276,7 +1311,7 @@ void dissect(ELE_INFO_t *ele_info) {
       }
              r = clock() - r;
     double dissectTIME = ((double)r)/CLOCKS_PER_SEC;
-printf("dissect time  per img %f, \n", dissectTIME);
+//printf("dissect time  per img %f, \n", dissectTIME);
       cur_img_data = next;
 
     }
@@ -1457,6 +1492,7 @@ void remove_image(IMAGE_t *i) {
 
 
 void combo_update(ELE_INFO_t *ele_info) {
+  printf("combo_update before stat: %f \n", ele_info->stat);
   if (ele_info->ele->img_no < 0) {
     err_no ++;
     fprintf(log_file, "error:  combo ele %d has %d images\n", ele_info->index, ele_info->ele->img_no);
@@ -1499,6 +1535,7 @@ void combo_update(ELE_INFO_t *ele_info) {
       }
       else obs_output(ele_info);
     }
+      printf("combo_update after stat: %f \n", ele_info->stat);
 }
 
 
@@ -1727,7 +1764,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
             printf("edges_and_cps:     **** image is the new high scoring primary!\n");
 	    max_score = cur_img->to_msp->iden;
 	    dir = cur_img->to_msp->direction;
-	    prim_p = cur_img->to_msp;
+	    prim_p =  cur_img->to_msp;
 	  }
 	}
         //
@@ -1736,8 +1773,8 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
           //      NOTE: Prequal flag is set
           printf("edges_and_cps:      Adding to consis tree (not full-length and no full-length found yet): e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
 	  consis_tree_build(consis_rt, cur_img, 1);
-          print_consis_tree(consis_rt);
-          print_ascii_tree(consis_rt);
+          //print_consis_tree(consis_rt);
+          //print_ascii_tree(consis_rt);
 	}
       }
       if (img_partner->ele_info->index != epi->index || i == eff_img_ct-1) {
