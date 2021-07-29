@@ -1475,6 +1475,12 @@ void TBD_merge(ELEMENT_t *ele) {
 
 // RMH: Perhaps where splitting occurs?
 void dissect(ELE_INFO_t *ele_info) {
+<<<<<<< Updated upstream
+=======
+  printf("dissect element: %d\n", ele_info->index);
+    clock_t r;
+    r = clock();
+>>>>>>> Stashed changes
   IMG_DATA_t *cur_img_data, *img_data_tmp, *next;
   MSP_t *msp_tmp, *msp_ori;
   IMAGE_t *img_partner, *target_img, *target_partner;
@@ -1488,8 +1494,14 @@ void dissect(ELE_INFO_t *ele_info) {
       dissected = 0;
       img_partner = partner(cur_img_data->to_image);
       ele_partner = img_partner->ele_info->ele;
+<<<<<<< Updated upstream
       if (full_length(img_partner, CUTOFF2)){ //test if image is full length > 0.9
         ele_partner->flimg_no --; //unclear ??? -kn
+=======
+      printf("dissect element partner: %d\n", ele_partner->index);
+      if (full_length(img_partner, CUTOFF2)){
+        ele_partner->flimg_no --;
+>>>>>>> Stashed changes
       }
       tbd_tmp = cur_ele->TBD;
       while (tbd_tmp != NULL) {
