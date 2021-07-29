@@ -38,7 +38,9 @@ typedef struct element {
   FRAG_t frag;
   int direction; 
   short update, l_hold;
-  int img_no, flimg_no, edge_no;
+  int img_no; // number of images mapping to element
+  int flimg_no; // number of images that are full length
+  int edge_no; // number of edges.....
   IMG_TREE_t *to_img_tree;
   IMG_DATA_t *to_img_data;
   EDGE_TREE_t *edges;
@@ -135,6 +137,7 @@ void fam_cleanup(FAMILY_t **);
 void frag_data_free(FRAG_DATA_t **);
 void frag_data_cleanup(FRAG_DATA_t **);
 
+void print_ele(ELEMENT_t *rt);
 void print_ele_info(ELE_INFO_t *rt);
 void print_ele_data(ELE_DATA_t *rt);
 
@@ -158,20 +161,53 @@ FILE *err, *new_msps, *eles, *unproc, *combo, *obs, *fams, *log_file;
 void print_ele_data(ELE_DATA_t *rt) {
   if (!rt) return;
   print_ele_info( rt->ele_info );
-  if (rt->next) 
+  if (rt->next)
     print_ele_data(rt->next);
 }
 
 void print_ele_info(ELE_INFO_t *rt) {
   if (!rt) return;
-  printf("ele: index=%d, stat=%c, file_update=%d", rt->index, rt->stat, 
+  printf("ELE_INFO_t: index=%d, stat=%c, file_update=%d,", rt->index, rt->stat,
          rt->file_updated );
-  if ( rt->to_family ) 
-    printf(" family_index=%d,", rt->to_family->index );
+  if ( rt->to_family )
+    printf(" to_family->index=%d,", rt->to_family->index );
+  else
+    printf(" to_family=Null,");
   if ( rt->ele )
-    printf(" ele_index=%d", rt->ele->index );
-  else 
-    printf(" ele=NULL");
+    printf(" ele->index=%d", rt->ele->index );
+  else
+    printf(" ele=Null");
+  printf("\n");
+}
+
+void print_ele(ELEMENT_t *rt) {
+  if (!rt) return;
+  printf("ELEMENT_t: index=%d, direction=%d, update=%d, l_hold=%d, img_no=%d, flimg_no=%d, edge_no=%d,",
+         rt->index, rt->direction, rt->update, rt->l_hold, rt->img_no, rt->flimg_no, rt->edge_no );
+  if ( rt->to_img_tree )
+    printf(" to_img_tree->to_image->index=%d,", rt->to_img_tree->to_image->index );
+  else
+    printf(" to_img_tree=Null,");
+  if ( rt->to_img_data )
+    printf(" to_img_data->to_image->index=%d,", rt->to_img_data->to_image->index );
+  else
+    printf(" to_img_data=Null,");
+  if ( rt->edges )
+    printf(" edges->to_edge->index=%d,", rt->edges->to_edge->index );
+  else
+    printf(" edges=Null,");
+  if ( rt->PCP )
+    printf(" PCP->cp=%d,", rt->PCP->cp );
+  else
+    printf(" PCP=Null,");
+  if ( rt->TBD )
+    printf(" TBD->bd=%d,", rt->TBD->bd );
+  else
+    printf(" TBD=Null,");
+  if ( rt->redef )
+    printf(" redef->ele_info->index=%d", rt->redef->ele_info->index );
+  else
+    printf(" redef=Null");
   printf("\n");
 }
 

@@ -45,7 +45,9 @@ typedef struct img_tree {
 
 typedef struct msp {
   /*struct msp_list *hanger;*/
-  char stat; /* 'p', 's' */
+  char stat; // 'p' = highest scoring MSP for a given element pair it must be full length
+             //       for at least one of the elements.
+             // 's'
   int32_t score;
   float iden;
   int direction;
