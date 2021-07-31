@@ -140,6 +140,11 @@ void frag_data_cleanup(FRAG_DATA_t **);
 void print_ele(ELEMENT_t *rt);
 void print_ele_info(ELE_INFO_t *rt);
 void print_ele_data(ELE_DATA_t *rt);
+void print_edge(EDGE_t *rt);
+void print_edge_tree(EDGE_TREE_t *rt, int level);
+void print_local_network(ELE_DATA_t *rt);
+void print_edge_tree_GML(EDGE_TREE_t *rt, int rel_to_ele_id);
+void print_all_eles_GML();
 
 /*MSP_DATA_t *all_msps=NULL;
   EDGE_t *efav=NULL;*/
@@ -210,6 +215,101 @@ void print_ele(ELEMENT_t *rt) {
     printf(" redef=Null");
   printf("\n");
 }
+
+void print_edge(EDGE_t *rt) {
+  if (!rt) return;
+  printf("EDGE_t: index=%d, type=%c, direction=%d, score=%d,", rt->index, rt->type,
+         rt->direction, rt->score );
+  if ( rt->ele1_info )
+    printf(" ele1_info->index=%d,", rt->ele1_info->index );
+  else
+    printf(" ele1_info=Null,");
+  if ( rt->ele2_info )
+    printf(" ele2_info->index=%d,", rt->ele2_info->index );
+  else
+    printf(" ele2_info=Null,");
+  printf("\n");
+}
+
+//
+//  Given an edge tree do a dfs and print out edges in GML format
+//
+//  If rel_to_ele_id is < 1 then print all edges defined in the
+//  the edge tree.  Otherwise only print the edges in which the
+//  lowest element index is the same as rel_to_ele_id.  This is
+//  used by other functions to print out a non-redundant set
+//  of edges.  Although this doesn't work if there are duplicates
+//  in the set.  I have seed a single node in which the following
+//  two edges were in the tree: 6 -> 8, and 8 -> 6.
+//
+//  RMH
+void print_edge_tree_GML(EDGE_TREE_t *rt, int rel_to_ele_id){
+  if (!rt) return;
+  if ( rel_to_ele_id < 1 ||
+       ((rt->to_edge->ele1_info->index < rt->to_edge->ele2_info->index &&
+        rt->to_edge->ele1_info->index == rel_to_ele_id ) ||
+       (rt->to_edge->ele2_info->index < rt->to_edge->ele1_info->index &&
+        rt->to_edge->ele2_info->index == rel_to_ele_id )) )
+    {
+    //printf("rel_to_ele_id=%d\n", rel_to_ele_id);
+    printf("edge [\n");
+    printf("       source %d\n", rt->to_edge->ele1_info->index );
+    printf("       target %d\n", rt->to_edge->ele2_info->index );
+    printf("       label \"index=%d, type=%c, direction=%d, score=%d\"\n", rt->to_edge->index, rt->to_edge->type,
+         rt->to_edge->direction, rt->to_edge->score );
+    printf("     ]\n");
+  }
+  if (rt->l)
+    print_edge_tree_GML(rt->l, rel_to_ele_id);
+  if (rt->r)
+    print_edge_tree_GML(rt->r, rel_to_ele_id);
+}
+
+
+//
+// Here because the all_eles array and ele_array_size
+// datastructures are global and not passed into the
+// functions. sigh...
+//
+void print_all_eles_GML() {
+  int i = 0;
+  printf("graph [\n");
+  for (i=0; i<ele_ct && i<ele_array_size; i++) {
+    printf("node [\n");
+    printf("       id %d\n", (*(all_ele+i))->index);
+    printf("       label \"e%d\"\n", (*(all_ele+i))->index);
+    printf("     ]\n");
+  }
+  for (i=0; i<ele_ct && i<ele_array_size; i++)
+    print_edge_tree_GML((*(all_ele+i))->ele->edges, (*(all_ele+i))->ele->index);
+  printf("]\n");
+}
+
+
+void print_local_network(ELE_DATA_t *rt) {
+  if (!rt) return;
+  ELE_DATA_t *curr;
+  curr=rt;
+  while ( curr ) {
+    //printf("loop over %d\n", curr->ele_info->ele->index);
+    print_edge_tree_GML(curr->ele_info->ele->edges, curr->ele_info->ele->index);
+    curr = curr->next;
+  }
+}
+
+void print_edge_tree(EDGE_TREE_t *rt, int level) {
+  int i;
+  if (!rt) return;
+  for ( i = 0; i < level; i++ )
+    printf("  ");
+  print_edge(rt->to_edge);
+  if (rt->l)
+    print_edge_tree(rt->l, level+1);
+  if (rt->r)
+    print_edge_tree(rt->r, level+1);
+}
+
+
 
 
 

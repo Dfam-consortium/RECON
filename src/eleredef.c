@@ -295,8 +295,11 @@ int main (int argc, char *argv[]) {
       } /*else if ((*(all_ele+i))->stat == 'O' && !(*(all_ele+i))->file_updated) spit_out_ele(*(all_ele+i));*/
     }
 
+
     start = 0;
 
+    // RMH: This appears to be a spill-over linked-list datastructure used after the all_eles pre-allocated
+    //      array is exceeded.
     cur_ele_info = ele_info_data;
     while(cur_ele_info) {
       fprintf(log_file, "evaluating definition of element %d\n", cur_ele_info->index);
@@ -316,7 +319,6 @@ int main (int argc, char *argv[]) {
        cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
   //  printf("redeftime 2 %f \n", cpu_time_used);
   }
-
      cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
 //printf("redeftime 3 %f \n", cpu_time_used);
   report_cts();
@@ -553,9 +555,14 @@ ELE_INFO_t *new_element() {
 
   ele_ct ++;
 
+  // RMH: It seems that the initial storage for elements is managed
+  //      as a pre-allocated, initialized array of eles.  Then once
+  //      that is exceeded they are allocated individually and it's
+  //      treated as a linked list from then on.
   if (ele_ct <= ele_array_size) ele_info_tmp = *(all_ele+ele_ct-1);
   else {
     ele_info_tmp = ele_info_init(ele_ct);
+    // This adds the element to the tail of the ele_info_data spill over..
     add_ele_info(ele_info_tmp);
   }
 
@@ -599,8 +606,12 @@ void add_ele_info(ELE_INFO_t *ele_info_tmp) {
 
 
 
-
+// z : original stat
+// t : after edges_and_cps
+// v : after local_ele_redef
+// X : after dismiss_element
 void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
+  int i;
   ELE_DATA_t *local_net=NULL, *local_net_tail=NULL;
   // Read in stage 1 element from "e#" ( where # is ele_info->index ).
   printf("general_ele_redef: %d\n",ele_info->index);
@@ -631,17 +642,31 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 
     fprintf(log_file, "new clan: %d for ele %d\n", clan_ct, ele_info->index);
     fflush(log_file);
+
+    // RMH: Build a graph centered on ele_info and extending out 3 degrees
+    //      of separation. TODO: Add details of edge labeling.
+    //
+    //   local_net is a linked list of ELE_INFO_t pointers (ELE_DATA_t) that
+    //             is built up by this method.
     build_local_network(ele_info, &local_net, &local_net_tail, img_ptr);
-    //if ( ele_info->index == 362 || ele_info->index == 10 )
-    //{
-    //  printf("Printing local net for 362\n");
-   //print_ele_data( local_net );
-    //}
+
+    // RMH: TODO: Describe the in-memory datastructure at this moment.  For
+    //            instance, what does local_net look like.  What is ele->PCP store?
+    //print_ele_data( local_net );
+    //print_local_network(local_net);
+    print_all_eles_GML();
+
     fprintf(log_file, "clan size: %d, clan core size: %d\n", clan_size, clan_core_size);
     fflush(log_file);
-    /* redefining elements in the local network */
-    /* local_ele_redef(ele_info, img_ptr); */
+
+    // redefining elements in the local network 
+    //   -- queues up all elements in the local_net linked list
+    //      and calls local_ele_redef on each
     cruise_local_net(local_net, img_ptr);
+
+    //print_local_network(local_net);
+    print_all_eles_GML();
+
     /* clearing up the local network */
     fflush(new_msps);
     fflush(combo);
@@ -668,13 +693,16 @@ void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **
   /* breadth first search */
   while (que) {
     clan_size ++;
-    //printf("queue entry: %d\n", que->ele_info->ele->index);
+    printf("queue entry: %d\n", que->ele_info->ele->index);
     // RMH: DEPTH currently set in bolts.h to 3
     if (que->ele_info->ele->l_hold <= DEPTH) {
       clan_core_size ++;
-      // RMH: edges_and_cps sets ele_info to 't'
+      // RMH: This builds a network of element relationships centered on ele_info and extending
+      //      DEPTH degress.  It also generates the list of endpoints for later clustering ( CP_t )
+      //      Sets ele_info to 't'
       if (que->ele_info->stat == 'z') edges_and_cps(que->ele_info, img_ptr);
       // Read in elements referenced in initial graph and add to queue ( up to 3 levels deep )
+      // The counter l_hold is incremented for all the edge partners of que->ele_info in this method
       if (que->ele_info->ele->edges) recruit(que->ele_info, que->ele_info->ele->edges, net_tail_p, img_ptr);
     }
     que = que->next;
@@ -688,11 +716,13 @@ void recruit(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, ELE_DATA_t **net_tail_p, IMA
   printf("recruit element: %d\n", ele_info->index);
   if (rt->l) recruit(ele_info, rt->l, net_tail_p, img_ptr);
 
+  // Extract the partner element using the edge information
   epi = linked_ele(ele_info, rt->to_edge);
   printf("recruit element epi: %d\n", epi->index);
   if (!epi->ele) ele_read_in(epi, 1);
   if (!epi->ele->l_hold) {
     epi->ele->l_hold = ele_info->ele->l_hold + 1;
+    // TODO: Determine when the 'v' state is set
     if (epi->stat == 'v' && epi->ele->l_hold < DEPTH) epi->ele->l_hold = DEPTH;
     member = (ELE_DATA_t *) malloc(sizeof(ELE_DATA_t));
     member->ele_info = epi;
@@ -712,6 +742,10 @@ void cruise_local_net(ELE_DATA_t *local_net, IMAGE_t **img_ptr) {
   int to_march = 1;
 
   while (to_march) {
+    // TODO: Determine why to_march was necessary.  I would assume that
+    //       local_ele_redef adds to the que, but they must have needed
+    //       a way to restart from the begining of the queue to reprocess
+    //       all the data again.
     to_march = 0;
     que = local_net;
     while (que) {
@@ -730,6 +764,18 @@ void local_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr, int *march_p) {
     ELE_DATA_t *new_ele_data;
     ELEMENT_t *ele = ele_info->ele;
 
+    // RMH: Debug
+    printf("local_ele_redef(): ele_info->index=%d, ele_info->stat=%c, ", ele_info->index, ele_info->stat);
+    if ( ele->redef != NULL )
+      printf("ele->redef=*, ");
+    else
+      printf("ele->redef=Null, ");
+    if ( ele->PCP )
+      printf("ele->PCP=*\n");
+    else
+      printf("ele->PCP=Null\n");
+    //
+
     if (ele->redef != NULL) {
       new_ele_data = ele->redef;
       while (new_ele_data != NULL) {
@@ -744,8 +790,6 @@ void local_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr, int *march_p) {
 	  } else ele_info->stat = 'v';
 	}
     }
-    printf("element name is: %d \n", ele_info->ele->index);
-   
 }
 
 
@@ -1836,6 +1880,8 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	}
       }else { printf("NOT SURE\n"); }
     }
+//printf("printing edge tree\n");
+//print_edge_tree(ele_info->ele->edges, 0);
 
     if (eff_img_ct > MAX_IMG) {
       free(img_ptr);
