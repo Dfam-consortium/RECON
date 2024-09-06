@@ -1,7 +1,11 @@
+
+
+CLEANUP In Progress
+
 RECON -- finding repeat families from biological sequences
-Version 1.08 (Jan 2014)
+Version development
 Copyright (C) 2001 Washington University School of Medicine
-Copyright (C) 2011-2021 Institute for Systems Biology
+Copyright (C) 2011-2024 Institute for Systems Biology
 ------------------------------------------------------------------
 
 
