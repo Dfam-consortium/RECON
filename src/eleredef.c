@@ -44,16 +44,14 @@
 //      "The ratio cutoff for splitting an element at a
 //       given position used in the element reevaluation
 //       and update procedure."
+//       It is a multiplier of the number of images that
+//       span a putative split position.
+// Original code had 2
 #define FUDGE 2
+//#define FUDGE 1.5
+//#define FUDGE 1
 #define MARGIN 10000
 #define FLURRY 10
-
-//typedef struct img_node {
-//  short recorded;
-//  IMAGE_t *to_image;
-//  struct img_node *sib;
-//  struct img_node *children;
-//} IMG_NODE_t;
 
 void report_cts();
 void report_redef_stat();
@@ -64,8 +62,8 @@ ELE_INFO_t *new_element();
 void add_ele_info(ELE_INFO_t *);
 
 void general_ele_redef(ELE_INFO_t *, IMAGE_t **);
-void build_local_network(ELE_INFO_t *, ELE_DATA_t **, ELE_DATA_t **, IMAGE_t **);
-void recruit(ELE_INFO_t *, EDGE_TREE_t *, ELE_DATA_t **, IMAGE_t **);
+void build_local_network(ELE_INFO_t *, ELE_DATA_t **, ELE_DATA_t **, IMAGE_t **, int);
+void recruit(ELE_INFO_t *, EDGE_TREE_t *, ELE_DATA_t **, IMAGE_t **, int);
 void cruise_local_net(ELE_DATA_t *, IMAGE_t **);
 void local_ele_redef(ELE_INFO_t *, IMAGE_t **, int*);
 void dissolve_local_network(ELE_DATA_t **);
@@ -101,10 +99,10 @@ void add_edge(ELE_INFO_t *, ELE_INFO_t *, char, int32_t, short);
 void adjust_edge_tree(ELE_INFO_t *);
 int charge_edge_array(EDGE_t **, EDGE_TREE_t *, int);
 int consis_tree_build(IMG_NODE_t *, IMAGE_t *, int);
-int print_consis_tree(IMG_NODE_t *rt);
+void test_consis_tree();
 int consis(IMAGE_t *, IMAGE_t *, float);
 IMG_NODE_t **node_entry(IMG_NODE_t **);
-void consis_tree_free(IMG_NODE_t *);
+int consis_tree_free(IMG_NODE_t *);
 int find_prim(IMG_NODE_t *, float, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int *, int32_t *, short *);
 
 void combo_output(ELE_INFO_t *);
@@ -122,13 +120,18 @@ int main (int argc, char *argv[]) {
   int i, ele_march, ei, rounds=0, start;
   char line[35], stat;
   short fu, to_march;
-     clock_t start1, r, t, end;
-     double cpu_time_used=0.0; 
-     double ele_defTIME;
-     double dissectTIME;
+  clock_t start1, r, t, end;
+  double cpu_time_used=0.0;
+  double ele_defTIME;
+  double dissectTIME;
   IMAGE_t **img_ptr;
   FILE *ele_no, *msp_no, *edge_no, *size_list, *new_stat;
   FILE *seq_list;
+
+
+   // DEBUG
+   //test_consis_tree();
+   //exit(10);
 
   /* processing command line */
   if (argc == 1) {
@@ -243,19 +246,19 @@ int main (int argc, char *argv[]) {
       /*sscanf(line, "%d %c %d\n", &ei, &stat, &fu);*/
       /* for some bizzare reason, scanf doesn't work properly here. :( */
       for (i=0; i<35; i++) {
-	if (line[i] == ' ') break;
+        if (line[i] == ' ') break;
       }
       ei = atoi(line);
       stat = line[i+1];
       fu = atoi(&line[i+3]);
       if (ei<=ele_array_size) {
-	(*(all_ele+ei-1))->stat = stat;
-	(*(all_ele+ei-1))->file_updated = fu;
+        (*(all_ele+ei-1))->stat = stat;
+        (*(all_ele+ei-1))->file_updated = fu;
       } else {
-	cur_ele_info = ele_info_init(ei);
-	cur_ele_info->stat = stat;
-	cur_ele_info->file_updated = fu;
-	add_ele_info(cur_ele_info);
+        cur_ele_info = ele_info_init(ei);
+        cur_ele_info->stat = stat;
+        cur_ele_info->file_updated = fu;
+        add_ele_info(cur_ele_info);
       }
     }
   }
@@ -269,7 +272,6 @@ int main (int argc, char *argv[]) {
   files_read = 0;
   err_no = 0;
 
-  /* re-define elements using the syntopy algorithm, and build edges */
   img_ptr = (IMAGE_t **) malloc(MAX_IMG*sizeof(IMAGE_t *));
 
   if ( ! img_ptr )
@@ -278,48 +280,50 @@ int main (int argc, char *argv[]) {
     exit(-1);
   }
 
+  //used as a counter to ensure every element gets redefined if applicable -kn
   to_march = 1;
   start1 = clock();
+  /* re-define elements using the syntopy algorithm, and build edges */
   while (to_march) {
     to_march = 0;
-    rounds ++;
+    rounds++;
     for (i=start; i<ele_ct && i<ele_array_size; i++) {
       fprintf(log_file, "Evaluating definition of element %d\n", (*(all_ele+i))->index);
       fflush(log_file);
+      // Check if the element has content -kn
       if ((*(all_ele+i))->stat == 'z' || (*(all_ele+i))->stat == 'w' || (*(all_ele+i))->stat == 't') {
-	to_march = 1;
-	general_ele_redef(*(all_ele+i), img_ptr);
+        to_march = 1;
+        general_ele_redef(*(all_ele+i), img_ptr);
 #if 0
-	report_redef_stat();
+        report_redef_stat();
 #endif
       } /*else if ((*(all_ele+i))->stat == 'O' && !(*(all_ele+i))->file_updated) spit_out_ele(*(all_ele+i));*/
     }
-
-
     start = 0;
 
     // RMH: This appears to be a spill-over linked-list datastructure used after the all_eles pre-allocated
-    //      array is exceeded.
+    //      array is exceeded.  ....or like in ele_def this is a set of unused elements that need to be reconsidered
+    //      once genereal_ele_redef has completed a round?
     cur_ele_info = ele_info_data;
     while(cur_ele_info) {
       fprintf(log_file, "evaluating definition of element %d\n", cur_ele_info->index);
       fflush(log_file);
       if (cur_ele_info->stat == 'z' || cur_ele_info->stat == 'w' || cur_ele_info->stat == 't') {
-	to_march = 1;
-	general_ele_redef(cur_ele_info, img_ptr);
+        to_march = 1;
+        general_ele_redef(cur_ele_info, img_ptr);
 #if 0
-	report_redef_stat();
+        report_redef_stat();
 #endif
       } /*else if (cur_ele_info->stat == 'O' && !cur_ele_info->file_updated) spit_out_ele(cur_ele_info);*/
       cur_ele_info = cur_ele_info->next;
 
-    // printf("redeftime 1 %f \n", cpu_time_used);
+      // printf("redeftime 1 %f \n", cpu_time_used);
     }
-      end = clock()-start1;
-       cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
-  //  printf("redeftime 2 %f \n", cpu_time_used);
+    end = clock()-start1;
+    cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
+    //  printf("redeftime 2 %f \n", cpu_time_used);
   }
-     cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
+  cpu_time_used = ((double) (end - start1)) / CLOCKS_PER_SEC; 
 //printf("redeftime 3 %f \n", cpu_time_used);
   report_cts();
   report_redef_stat();
@@ -448,34 +452,34 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
     }
     if (/*!strncmp(ele_tmp->frag.seq_name, cur_img_data->to_image->frag.seq_name, NAME_LEN)*/ ele_tmp->frag.seq_name == cur_img_data->to_image->frag.seq_name && ele_tmp->frag.rb - cur_img_data->to_image->frag.lb > 10) { /*checking possible images */
       if (sing_cov(&ele_tmp->frag, &cur_img_data->to_image->frag, cutoff)) { /* a good image */
-	ele_tmp->img_no ++;
-	/* move cur_img_data from the original list */
-	/* notice that it's a bit more complicated than above */
-	if (prev_img_data != NULL) {
-	  prev_img_data->next = cur_img_data->next;
-	} else {
-	  *img_data_p = cur_img_data->next;
-	}
-	/* update the current image and move it to the image_list of ele_tmp */
-	cur_img_data->to_image->ele_info = ele_info_tmp;
-	cur_img_data->next = ele_tmp->to_img_data;
-	ele_tmp->to_img_data = cur_img_data;
+        ele_tmp->img_no ++;
+        /* move cur_img_data from the original list */
+        /* notice that it's a bit more complicated than above */
+        if (prev_img_data != NULL) {
+          prev_img_data->next = cur_img_data->next;
+        } else {
+          *img_data_p = cur_img_data->next;
+        }
+        /* update the current image and move it to the image_list of ele_tmp */
+        cur_img_data->to_image->ele_info = ele_info_tmp;
+        cur_img_data->next = ele_tmp->to_img_data;
+        ele_tmp->to_img_data = cur_img_data;
 
-	/* updating definition of the element if necessary, and move cur_img_data to the right place */
-	/* notice that it is a bit complicated than above */
-	if (ele_tmp->frag.rb < cur_img_data->to_image->frag.rb) { 
-	  ele_tmp->frag.rb = cur_img_data->to_image->frag.rb;
-	  /* ele_tmp->frag.rst = cur_img_data->to_image->frag.rst; */
-	  /* time to go back and check if previously unqualified images are now good to be participated to the updated element */
-	  cur_img_data = *img_data_p;
-	  prev_img_data = NULL;
-	} else {
-	  if (prev_img_data != NULL) cur_img_data = prev_img_data->next;
-	  else cur_img_data = *img_data_p;
-	}
+        /* updating definition of the element if necessary, and move cur_img_data to the right place */
+        /* notice that it is a bit complicated than above */
+        if (ele_tmp->frag.rb < cur_img_data->to_image->frag.rb) { 
+          ele_tmp->frag.rb = cur_img_data->to_image->frag.rb;
+          /* ele_tmp->frag.rst = cur_img_data->to_image->frag.rst; */
+          /* time to go back and check if previously unqualified images are now good to be participated to the updated element */
+          cur_img_data = *img_data_p;
+          prev_img_data = NULL;
+        } else {
+          if (prev_img_data != NULL) cur_img_data = prev_img_data->next;
+          else cur_img_data = *img_data_p;
+        }
       } else { /* current image not good for the ele_tmp, keep it in the remaining list and move on */
-	prev_img_data = cur_img_data;
-	cur_img_data = cur_img_data->next;
+        prev_img_data = cur_img_data;
+        cur_img_data = cur_img_data->next;
       }
     } else { /* time to finish defining of ele_tmp */
       /* add the element to the list of elements */
@@ -508,10 +512,10 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
     generate_img_tree(ele_data_tmp->ele_info->ele);
     /*ct = count_img_nodes(ele_data_tmp->ele_info->ele->to_img_tree);
     if (ct != ele_data_tmp->ele_info->ele->img_no) {
-	err_no ++;
-	fprintf(log_file, "error:  trouble generating image tree for redefed offsprings: ele %d %d %d\n", ele_data_tmp->ele_info->index, ele_data_tmp->ele_info->ele->img_no, ct);
-	fflush(log_file);
-	exit(2);
+        err_no ++;
+        fprintf(log_file, "error:  trouble generating image tree for redefed offsprings: ele %d %d %d\n", ele_data_tmp->ele_info->index, ele_data_tmp->ele_info->ele->img_no, ct);
+        fflush(log_file);
+        exit(2);
     }*/
         t = clock() - t;
     double ele_defTIME = ((double)t)/CLOCKS_PER_SEC;
@@ -648,13 +652,14 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     //
     //   local_net is a linked list of ELE_INFO_t pointers (ELE_DATA_t) that
     //             is built up by this method.
-    build_local_network(ele_info, &local_net, &local_net_tail, img_ptr);
+    build_local_network(ele_info, &local_net, &local_net_tail, img_ptr, DEPTH);
 
     // RMH: TODO: Describe the in-memory datastructure at this moment.  For
     //            instance, what does local_net look like.  What is ele->PCP store?
     //print_ele_data( local_net );
     //print_local_network(local_net);
-    print_all_eles_GML();
+    //print_all_eles_GML();
+    print_all_eles_GV();
 
     fprintf(log_file, "clan size: %d, clan core size: %d\n", clan_size, clan_core_size);
     fflush(log_file);
@@ -665,7 +670,8 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     cruise_local_net(local_net, img_ptr);
 
     //print_local_network(local_net);
-    print_all_eles_GML();
+    //print_all_eles_GML();
+    print_all_eles_GV();
 
     /* clearing up the local network */
     fflush(new_msps);
@@ -676,54 +682,80 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 }
 
 
-
-void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
+// Build a graph centered on ele_info and extending out max_depth degrees
+//   of separation.  It also generates a list of endpoints for later clustering
+//   (CP_t).
+//
+//      TODO: Add details of edge labeling.
+//
+//   NOTE: max_depth is currently hard coded to 3.
+//
+//   local_net is a linked list of ELE_INFO_t pointers (ELE_DATA_t) that
+//             is built up by this method.
+void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr, int max_depth) {
   ELEMENT_t *ele;
   ELE_DATA_t *que;
   printf("build local network: %d\n", ele_info->index);
-  /* seed the network with the first element */
+
+  // seed the network with the first element
   que = (ELE_DATA_t *) malloc(sizeof(ELE_DATA_t));
   que->ele_info = ele_info;
   que->next = NULL;
   *net_p = que;
   *net_tail_p = que;
 
+  // In this context l_hold stores the depth of the element in the
+  // network.
   ele_info->ele->l_hold = 1;
 
-  /* breadth first search */
+  // Process the queue of elements
   while (que) {
     clan_size ++;
     printf("queue entry: %d\n", que->ele_info->ele->index);
-    // RMH: DEPTH currently set in bolts.h to 3
-    if (que->ele_info->ele->l_hold <= DEPTH) {
+    if (que->ele_info->ele->l_hold <= max_depth) {
       clan_core_size ++;
-      // RMH: This builds a network of element relationships centered on ele_info and extending
-      //      DEPTH degress.  It also generates the list of endpoints for later clustering ( CP_t )
-      //      Sets ele_info to 't'
+      // NOTE: edges_and_cps sets ele_info to 't'
       if (que->ele_info->stat == 'z') edges_and_cps(que->ele_info, img_ptr);
       // Read in elements referenced in initial graph and add to queue ( up to 3 levels deep )
-      // The counter l_hold is incremented for all the edge partners of que->ele_info in this method
-      if (que->ele_info->ele->edges) recruit(que->ele_info, que->ele_info->ele->edges, net_tail_p, img_ptr);
+      if (que->ele_info->ele->edges) recruit(que->ele_info, que->ele_info->ele->edges, net_tail_p, img_ptr, max_depth);
     }
     que = que->next;
   }
 }
 
 
-void recruit(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
+// Given an element and an edge tree, recursively load the elements referenced in the edge tree in
+// a depth first manner.  The elements are added to the network if they haven't been added yet.
+void recruit(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr, int max_depth) {
   ELE_INFO_t *epi;
   ELE_DATA_t *member;
-  printf("recruit element: %d\n", ele_info->index);
-  if (rt->l) recruit(ele_info, rt->l, net_tail_p, img_ptr);
+
+  // If left child exists, recruit it
+  if (rt->l) recruit(ele_info, rt->l, net_tail_p, img_ptr, max_depth);
 
   // Extract the partner element using the edge information
   epi = linked_ele(ele_info, rt->to_edge);
-  printf("recruit element epi: %d\n", epi->index);
+  printf("Element %d is recruiting element epi: %d\n", ele_info->index, epi->index);
+
+  // If it's not already in-memory, read it in
   if (!epi->ele) ele_read_in(epi, 1);
+
+  // If the element hasn't been added to the network yet, add it
   if (!epi->ele->l_hold) {
+
+    // l_hold, in this context, is the depth of the element in the network.  If it's
+    // zero then it hasn't been added to the network yet and should be set to one
+    // higher than the current element.
     epi->ele->l_hold = ele_info->ele->l_hold + 1;
+
     // TODO: Determine when the 'v' state is set
-    if (epi->stat == 'v' && epi->ele->l_hold < DEPTH) epi->ele->l_hold = DEPTH;
+    //   ... Set in ele_redef() or in local_ele_redef()...which appear to be later in the
+    //       algorithm.
+    //   ... this looks like 'v' causes the element to be terminal even if it's l_hold is
+    //       less than the max_depth.
+    if (epi->stat == 'v' && epi->ele->l_hold < max_depth) epi->ele->l_hold = max_depth;
+
+    // Allocate memory for a new ELE_DATA_t and add it to the network
     member = (ELE_DATA_t *) malloc(sizeof(ELE_DATA_t));
     member->ele_info = epi;
     member->next = NULL;
@@ -731,7 +763,8 @@ void recruit(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, ELE_DATA_t **net_tail_p, IMA
     *net_tail_p = member;
   }
 
-  if (rt->r) recruit(ele_info, rt->r, net_tail_p, img_ptr);
+  // If right child exists, recruit it
+  if (rt->r) recruit(ele_info, rt->r, net_tail_p, img_ptr, max_depth);
 }
 
 
@@ -749,10 +782,10 @@ void cruise_local_net(ELE_DATA_t *local_net, IMAGE_t **img_ptr) {
     to_march = 0;
     que = local_net;
     while (que) {
-	if (que->ele_info->ele->l_hold <= DEPTH) {
-	  local_ele_redef(que->ele_info, img_ptr, &to_march);
-	}
-	que = que->next;
+        if (que->ele_info->ele->l_hold <= DEPTH) {
+          local_ele_redef(que->ele_info, img_ptr, &to_march);
+        }
+        que = que->next;
     }
   }
 }
@@ -783,12 +816,12 @@ void local_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr, int *march_p) {
         new_ele_data = new_ele_data->next;
       }
     } else {
-	if (ele_info->stat != 'v' && ele_info->stat != 'X') {
-	  if (ele->PCP) {
-  	    *march_p = 1;
-	    ele_redef(ele_info, img_ptr);
-	  } else ele_info->stat = 'v';
-	}
+        if (ele_info->stat != 'v' && ele_info->stat != 'X') {
+          if (ele->PCP) {
+              *march_p = 1;
+            ele_redef(ele_info, img_ptr);
+          } else ele_info->stat = 'v';
+        }
     }
 }
 
@@ -821,9 +854,9 @@ void dissolve_local_network(ELE_DATA_t **net_p) {
     /*md = all_msps;
     while (md) {
       if (md->to_msp) {
-	fprint_msp(log_file, md->to_msp);
-	fflush(log_file);
-	MSP_free(md->to_msp);
+        fprint_msp(log_file, md->to_msp);
+        fflush(log_file);
+        MSP_free(md->to_msp);
       }
       md = md->next;
     }
@@ -854,16 +887,16 @@ void dismiss_element(ELE_INFO_t *ele_info) {
       new_ele_data = ele_info->ele->redef;
       while (new_ele_data) {
         dismiss_element(new_ele_data->ele_info);
-	new_ele_data = new_ele_data->next;
+        new_ele_data = new_ele_data->next;
       }
-    } 
+    }
     /*printf("clearing ele %d\n", ele_info->index);*/
     ele_info->ele->l_hold = 0;
     if (ele_info->stat != 'X') {
       if (!ele_info->ele->img_no) {
-	ele_info->stat = 'X';
-	if (ele_info->ele->redef) combo_output(ele_info);
-	else obs_output(ele_info);
+        ele_info->stat = 'X';
+        if (ele_info->ele->redef) combo_output(ele_info);
+        else obs_output(ele_info);
       } else ele_write_out(ele_info, 1);
     }
     ele_cleanup(&ele_info->ele);
@@ -916,86 +949,92 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     else{
       printf("the name of the element without a PCP is %d \n", cur_ele->index);
     }
+    // If there are multiple TBDs within 10bp(strict) of each other keep the
+    // one with the higher support.
     if (cur_ele->TBD) {
       TBD_merge(cur_ele);
     }
+    // PCP: Contains all the images for the element (preliminary cluster points?)
+    // TBD: 
     if (cur_ele->TBD) {
 #if 0
       to_dissect = 1;\  
       if (cur_ele->TBD->bd - cur_ele->frag.lb <= FLURRY || cur_ele->TBD->bd - cur_ele->frag.rb >= -FLURRY) {
-	if (!cur_ele->TBD->next) {
-	  to_dissect = 0;
-	  if (cur_ele->TBD->bd - cur_ele->frag.lb <= FLURRY) cur_ele->frag.lb = cur_ele->TBD->bd;
-	  else cur_ele->frag.rb = cur_ele->TBD->bd;
-	  BD_free(&cur_ele->TBD);
-	} else {
-	  if (cur_ele->TBD->next->bd - cur_ele->frag.rb >= -FLURRY) {
-	    if (!cur_ele->TBD->next->next) {
-	      to_dissect = 0;
-	      cur_ele->frag.lb = cur_ele->TBD->bd;
-	      cur_ele->frag.rb = cur_ele->TBD->next->bd;
-	      BD_free(&cur_ele->TBD);
-	    }
-	  }
-	}
+        if (!cur_ele->TBD->next) {
+          to_dissect = 0;
+          if (cur_ele->TBD->bd - cur_ele->frag.lb <= FLURRY) cur_ele->frag.lb = cur_ele->TBD->bd;
+          else cur_ele->frag.rb = cur_ele->TBD->bd;
+          BD_free(&cur_ele->TBD);
+        } else {
+          if (cur_ele->TBD->next->bd - cur_ele->frag.rb >= -FLURRY) {
+            if (!cur_ele->TBD->next->next) {
+              to_dissect = 0;
+              cur_ele->frag.lb = cur_ele->TBD->bd;
+              cur_ele->frag.rb = cur_ele->TBD->next->bd;
+              BD_free(&cur_ele->TBD);
+            }
+          }
+        }
       }
 #endif
       pbd = cur_ele->TBD;
       while (pbd) {
-	if (pbd->bd-cur_ele->frag.lb>FLURRY && pbd->bd-cur_ele->frag.rb<-FLURRY) {
-	  to_dissect ++;
-	}
-	pbd = pbd->next;
+        // FLURRY = 10
+        // If the TBD is >10bp from both the left/right edge of the element, dissect
+        if (pbd->bd-cur_ele->frag.lb > FLURRY && pbd->bd-cur_ele->frag.rb < -FLURRY) {
+          to_dissect ++;
+        }
+        pbd = pbd->next;
       }
 
       if (!to_dissect) {
-	pbd = cur_ele->TBD;
-	while (pbd) {
-	  if (/*pbd->bd-cur_ele->frag.lb>0 &&*/ pbd->bd-cur_ele->frag.lb<=FLURRY) {
-	    cur_ele->frag.lb = pbd->bd;
-	  } else if (/*pbd->bd-cur_ele->frag.rb<0 &&*/ pbd->bd-cur_ele->frag.rb>=-FLURRY) {
-	    cur_ele->frag.rb = pbd->bd;
-	  }
-	  pbd = pbd->next;
-	}
-	BD_free(&cur_ele->TBD);
+        pbd = cur_ele->TBD;
+        while (pbd) {
+          if (/*pbd->bd-cur_ele->frag.lb>0 &&*/ pbd->bd-cur_ele->frag.lb<=FLURRY) {
+            cur_ele->frag.lb = pbd->bd;
+          } else if (/*pbd->bd-cur_ele->frag.rb<0 &&*/ pbd->bd-cur_ele->frag.rb>=-FLURRY) {
+            cur_ele->frag.rb = pbd->bd;
+          }
+          pbd = pbd->next;
+        }
+        BD_free(&cur_ele->TBD);
       } else {
-	/* dissect all images according to the TBDs */
-	dissect(ele_info);
-	/* redefine elements according to the dissected images, if any left */
-	if (cur_ele->img_no) {
-	  cur_ele->to_img_data = img_data_sort(cur_ele->to_img_data, cur_ele->img_no);
+        /* dissect all images according to the TBDs */
+        dissect(ele_info);
+        /* redefine elements according to the dissected images, if any left */
+        if (cur_ele->img_no) {
+          cur_ele->to_img_data = img_data_sort(cur_ele->to_img_data, cur_ele->img_no);
 
-	  cur_ele->redef = ele_def(&cur_ele->to_img_data, CUTOFF1);
+          cur_ele->redef = ele_def(&cur_ele->to_img_data, CUTOFF1);
 
-	}
-	/* clear unnecessary memory, 'v'->'w' and update CPs for w's */
-	combo_update(ele_info);
-	/* ele_redef() for offspring elements.  we finish redefinition of all
+        }
+        /* clear unnecessary memory, 'v'->'w' and update CPs for w's */
+        combo_update(ele_info);
+        /* ele_redef() for offspring elements.  we finish redefinition of all
          * offsprings before pulling in partners, because the combo may
          * have > 1 copy of the same family, which means other members' CPs
          * won't be fully updated until all offsprings are processed
          */
-	new_ele_data = cur_ele->redef;
-	while (new_ele_data != NULL) {
-	  new_ele_data->ele_info->ele->update = 1;
-	  new_ele_data->ele_info->ele->l_hold = cur_ele->l_hold;
-	  if (new_ele_data->ele_info->ele->to_img_tree) {
-	    edges_and_cps(new_ele_data->ele_info, img_ptr);
-	    if (new_ele_data->ele_info->ele->PCP) ele_redef(new_ele_data->ele_info, img_ptr);
-	    else new_ele_data->ele_info->stat = 'v';
-	  } else {
-	   if (new_ele_data->ele_info->ele->img_no) {
-	    err_no ++;
-	    fprintf(log_file, "error:  image tree missing in newly redefed offspring %d\n", new_ele_data->ele_info->index);
-	    fflush(log_file);
-	    exit(2);
-	   } else {
-	    combo_output(new_ele_data->ele_info);
-	   }
-	  }
-	  new_ele_data = new_ele_data->next;
-	}
+        new_ele_data = cur_ele->redef;
+        while (new_ele_data != NULL) {
+          new_ele_data->ele_info->ele->update = 1;
+          new_ele_data->ele_info->ele->l_hold = cur_ele->l_hold;
+          if (new_ele_data->ele_info->ele->to_img_tree) {
+            edges_and_cps(new_ele_data->ele_info, img_ptr);
+            if (new_ele_data->ele_info->ele->PCP) ele_redef(new_ele_data->ele_info, img_ptr);
+            else new_ele_data->ele_info->stat = 'v';
+          } else {
+           if (new_ele_data->ele_info->ele->img_no) {
+            err_no ++;
+            fprintf(log_file, "error:  image tree missing in newly redefed offspring %d\n", new_ele_data->ele_info->index);
+            fflush(log_file);
+            exit(2);
+           } else {
+            combo_output(new_ele_data->ele_info);
+           }
+          }
+          new_ele_data = new_ele_data->next;
+        }
       }
     }
     if (cur_ele->img_no > 0) {
@@ -1046,27 +1085,37 @@ void PCP_to_TBDs(ELEMENT_t *ele) {
 
   /* sort the PCP list according to cp */
   CP_sort(&ele->PCP);
-  /*clustering the PCPs into PBDs */
+  // Clustering the PCPs into PBDs
   pbds = CP_cluster(ele->PCP);
-  /* identify TBP from PBDs */
+  /* identify TBD from PBDs */
   /* TBDs are removed from PBDs, what is left in PBDs are those unsuccessful ones */
   pbd_tmp = pbds;
   pbd_prev = NULL;
   while (pbd_tmp != NULL) {
     /* s is the KEY! */
+
+    // How many images span the cutpoint +/- 10 bp ( hardcoded )?
+    //  
+    // This calculates the number of images that span
+    // +/-10bp of this putative split point (PBD),
+    // multiplied by FUDGE (2).
     s = span(ele, pbd_tmp->bd);
+    printf("Considering bd=%d, support=%d, span(s)=%d\n", pbd_tmp->bd, pbd_tmp->support, s);
+    // Give the above info, this indicates that for a PBD to be
+    // considered a TBD it must have support >= 2*count_of_images_spanning
     if (pbd_tmp->support >= s) {
-	if (pbd_prev == NULL) {
-	  pbds = pbd_tmp->next;
-	  pbd_tmp->next = ele->TBD;
-	  ele->TBD = pbd_tmp;
-	  pbd_tmp = pbds;
-	} else {
-	  pbd_prev->next = pbd_tmp->next;
-	  pbd_tmp->next = ele->TBD;
-	  ele->TBD = pbd_tmp;
-	  pbd_tmp = pbd_prev->next;
-	}
+        printf("Adding to TBD!\n");
+        if (pbd_prev == NULL) {
+          pbds = pbd_tmp->next;
+          pbd_tmp->next = ele->TBD;
+          ele->TBD = pbd_tmp;
+          pbd_tmp = pbds;
+        } else {
+          pbd_prev->next = pbd_tmp->next;
+          pbd_tmp->next = ele->TBD;
+          ele->TBD = pbd_tmp;
+          pbd_tmp = pbd_prev->next;
+        }
     } else {
       pbd_prev = pbd_tmp;
       pbd_tmp = pbd_tmp->next;
@@ -1076,30 +1125,16 @@ void PCP_to_TBDs(ELEMENT_t *ele) {
   BD_free(&pbds);
 }
 
-
+//
 // RMH:
-//    CP_t is a linked list structure that holds
-//    an integer and a pointer to an ele_info structure.
-//       typedef struct cp_list {
-//           int32_t cp;
-//           struct ele_info *contributor;
-//           struct cp_list *next;
-//       } CP_t;
+// The PCP list ( what I assume is always being considered here )
+// is a linked list of image endpoints for primary images (edges)
+// linking this element with others.  For example
 //
-// CP: cp=1, ele_info.index = 2, ele_info.stat = t
-// CP: cp=1597, ele_info.index = 2, ele_info.stat = t
-// CP: cp=1597, ele_info.index = 2, ele_info.stat = t
-// CP: cp=2, ele_info.index = 1, ele_info.stat = v
-// CP: cp=1600, ele_info.index = 1, ele_info.stat = v
-// CP: cp=1600, ele_info.index = 1, ele_info.stat = v
-// CP: cp=2, ele_info.index = 4, ele_info.stat = t
-// CP: cp=399, ele_info.index = 4, ele_info.stat = t
-// CP: cp=399, ele_info.index = 4, ele_info.stat = t
-// CP: cp=1, ele_info.index = 3, ele_info.stat = v
-// CP: cp=400, ele_info.index = 3, ele_info.stat = v
-// CP: cp=400, ele_info.index = 3, ele_info.stat = v
-//
-//  cps->cp appears to be endpoints?
+// This clusters points that are within 20bp of each other
+// and do not have gaps of more than 10bp.  A BD entry which
+// contains the average position is returned for each cluster
+// along with the number of copies in the cluster (support).
 //
 BD_t *CP_cluster(CP_t *cps) {
   int32_t first = cps->cp, last = cps->cp, sum = 0;
@@ -1122,11 +1157,11 @@ BD_t *CP_cluster(CP_t *cps) {
       bd_tmp->support = cpct;
       bd_tmp->next = bds;
       bds = bd_tmp;
-      if (cps->cp - last <= 10)	begin = cps;
+      if (cps->cp - last <= 10)        begin = cps;
       else begin = begin->next;
       if (begin) {
-	first = begin->cp;
-	last = first;
+        first = begin->cp;
+        last = first;
       }
       sum = 0;
       cpct = 0;
@@ -1208,26 +1243,34 @@ void BD_sort(BD_t **BD_ptr) {
 }
 
 
-
-
+//
+// Count how many images span the cut point +/- 10bp
+// For some reason return this value scaled by
+// "FUDGE" which is currently set to
+//
+//   Start before cut - 10 and end after cut + 10.
+//
+//
 int span(ELEMENT_t *ele, int32_t cut) {
   /* span requires PCP sorted according to cp_cmp and images sorted according to frag_cmp */
-  int left=0, rite=0;
+  int left=0, right=0;
   IMG_DATA_t *id;
 
   id = ele->to_img_data;
   while (id && id->to_image->frag.lb <= cut-10) {
     left ++;
-    if (id->to_image->frag.rb <= cut+10) rite ++;
+    if (id->to_image->frag.rb <= cut+10) right ++;
     id = id->next;
   }
-  return (left-rite)*FUDGE;
+  return (left-right)*FUDGE;
 }
 
 
 
 
-
+// If there are multiple TBDs within
+// 10bp of each other keep the one with
+// the higher support.
 void TBD_merge(ELEMENT_t *ele) {
   BD_t *prev=NULL, *cur, *next;
 
@@ -1237,16 +1280,16 @@ void TBD_merge(ELEMENT_t *ele) {
   while (next != NULL) {
     if (next->bd - cur->bd <= 10) {
       if (cur->support < next->support) {
-	if (prev == NULL) {
-	  ele->TBD = next;
-	} else {
-	  prev->next = next;
-	}
-	free(cur);
-	cur = next;
+        if (prev == NULL) {
+          ele->TBD = next;
+        } else {
+          prev->next = next;
+        }
+        free(cur);
+        cur = next;
       } else {
-	cur->next = next->next;
-	free(next);
+        cur->next = next->next;
+        free(next);
       }
       if (cur) next = cur->next;
       else next = NULL;
@@ -1289,69 +1332,69 @@ void dissect(ELE_INFO_t *ele_info) {
       }
       tbd_tmp = cur_ele->TBD;
       while (tbd_tmp != NULL) {
-	if (tbd_tmp->bd > cur_img_data->to_image->frag.lb || !tbd_tmp->next) {
-	  if (tbd_tmp->bd > cur_img_data->to_image->frag.lb && tbd_tmp->bd < cur_img_data->to_image->frag.rb) {
-	    if (tbd_tmp->bd - cur_img_data->to_image->frag.lb <= TOO_SHORT) {
-	      cur_img_data->to_image->to_msp->score = (int32_t) (cur_img_data->to_image->frag.rb-tbd_tmp->bd+1.)/(cur_img_data->to_image->frag.rb-cur_img_data->to_image->frag.lb+1.)*cur_img_data->to_image->to_msp->score;
-	      if (cur_img_data->to_image->to_msp->direction == 1) img_partner->frag.lb += tbd_tmp->bd - cur_img_data->to_image->frag.lb;
-	      else img_partner->frag.rb -= tbd_tmp->bd - cur_img_data->to_image->frag.lb;
-	      cur_img_data->to_image->frag.lb = tbd_tmp->bd;
-	    } else if (tbd_tmp->bd - cur_img_data->to_image->frag.rb >= -TOO_SHORT) {
-	      cur_img_data->to_image->to_msp->score = (int32_t) (tbd_tmp->bd-cur_img_data->to_image->frag.lb+1.)/(cur_img_data->to_image->frag.rb-cur_img_data->to_image->frag.lb+1.)*cur_img_data->to_image->to_msp->score;
-	      if (cur_img_data->to_image->to_msp->direction == 1) img_partner->frag.rb -= cur_img_data->to_image->frag.rb - tbd_tmp->bd;
-	      else img_partner->frag.lb += cur_img_data->to_image->frag.rb - tbd_tmp->bd;
-	      cur_img_data->to_image->frag.rb = tbd_tmp->bd;
-	    } else {
-	      dissected = 1;
-	      /* create a new MSP to hold the left products of the dissection */
-	      msp_tmp = add_msp(cur_img_data->to_image->to_msp);
-	      /* upgrade the content of the new MSP */
-	      if (cur_img_data->to_image == &cur_img_data->to_image->to_msp->query) { 
-		target_img = &msp_tmp->query;
-		target_partner = &msp_tmp->sbjct;
-	      } else {
-		target_img = &msp_tmp->sbjct;
-		target_partner = &msp_tmp->query;
-	      }
-	      msp_tmp->score = (int32_t) (tbd_tmp->bd-target_img->frag.lb+1.)/(target_img->frag.rb-target_img->frag.lb+1.)*msp_tmp->score;
-	      if (msp_tmp->direction == 1) {
+        if (tbd_tmp->bd > cur_img_data->to_image->frag.lb || !tbd_tmp->next) {
+          if (tbd_tmp->bd > cur_img_data->to_image->frag.lb && tbd_tmp->bd < cur_img_data->to_image->frag.rb) {
+            if (tbd_tmp->bd - cur_img_data->to_image->frag.lb <= TOO_SHORT) {
+              cur_img_data->to_image->to_msp->score = (int32_t) (cur_img_data->to_image->frag.rb-tbd_tmp->bd+1.)/(cur_img_data->to_image->frag.rb-cur_img_data->to_image->frag.lb+1.)*cur_img_data->to_image->to_msp->score;
+              if (cur_img_data->to_image->to_msp->direction == 1) img_partner->frag.lb += tbd_tmp->bd - cur_img_data->to_image->frag.lb;
+              else img_partner->frag.rb -= tbd_tmp->bd - cur_img_data->to_image->frag.lb;
+              cur_img_data->to_image->frag.lb = tbd_tmp->bd;
+            } else if (tbd_tmp->bd - cur_img_data->to_image->frag.rb >= -TOO_SHORT) {
+              cur_img_data->to_image->to_msp->score = (int32_t) (tbd_tmp->bd-cur_img_data->to_image->frag.lb+1.)/(cur_img_data->to_image->frag.rb-cur_img_data->to_image->frag.lb+1.)*cur_img_data->to_image->to_msp->score;
+              if (cur_img_data->to_image->to_msp->direction == 1) img_partner->frag.rb -= cur_img_data->to_image->frag.rb - tbd_tmp->bd;
+              else img_partner->frag.lb += cur_img_data->to_image->frag.rb - tbd_tmp->bd;
+              cur_img_data->to_image->frag.rb = tbd_tmp->bd;
+            } else {
+              dissected = 1;
+              /* create a new MSP to hold the left products of the dissection */
+              msp_tmp = add_msp(cur_img_data->to_image->to_msp);
+              /* upgrade the content of the new MSP */
+              if (cur_img_data->to_image == &cur_img_data->to_image->to_msp->query) { 
+        	target_img = &msp_tmp->query;
+        	target_partner = &msp_tmp->sbjct;
+              } else {
+        	target_img = &msp_tmp->sbjct;
+        	target_partner = &msp_tmp->query;
+              }
+              msp_tmp->score = (int32_t) (tbd_tmp->bd-target_img->frag.lb+1.)/(target_img->frag.rb-target_img->frag.lb+1.)*msp_tmp->score;
+              if (msp_tmp->direction == 1) {
                 // RMH: When tracking down the divide by zero problem I ended up signaling this
                 //      spot in the code as the likely place where things went initially wrong.
                 //      Explore further.
-		target_partner->frag.rb -= target_img->frag.rb - tbd_tmp->bd;
-	      }
-	      else {
-		target_partner->frag.lb += target_img->frag.rb - tbd_tmp->bd;
-	      }
-	      target_img->frag.rb = tbd_tmp->bd;
-	      fprint_msp(new_msps, msp_tmp);
-	      /* keep or ignore the new msp */
-	      register_image(target_img, cur_ele);
+        	target_partner->frag.rb -= target_img->frag.rb - tbd_tmp->bd;
+              }
+              else {
+        	target_partner->frag.lb += target_img->frag.rb - tbd_tmp->bd;
+              }
+              target_img->frag.rb = tbd_tmp->bd;
+              fprint_msp(new_msps, msp_tmp);
+              /* keep or ignore the new msp */
+              register_image(target_img, cur_ele);
 
-	      /* create the right product */
-	      /* we cheat here.  instead of generating a new MSP, we change the content
+              /* create the right product */
+              /* we cheat here.  instead of generating a new MSP, we change the content
                * of the original one, then output it into new_msp when finished.  in
                * the meantime, the index of the MSP is unchanged, which points to the
                * oringinal MSP
                */
-	      cur_img_data->to_image->to_msp->score -= msp_tmp->score;
-	      if (cur_img_data->to_image->to_msp->direction == 1) img_partner->frag.lb += tbd_tmp->bd - cur_img_data->to_image->frag.lb + 1;
-	      else img_partner->frag.rb -= tbd_tmp->bd - cur_img_data->to_image->frag.lb + 1;
-	      cur_img_data->to_image->frag.lb = tbd_tmp->bd +1;
-	    }
-	  }
-	  if (tbd_tmp->bd >= cur_img_data->to_image->frag.rb || !tbd_tmp->next) { /* end of this image */
-	    if (dissected) {
-		fprint_msp(new_msps, cur_img_data->to_image->to_msp);
-	    }
-	    if (too_short(&cur_img_data->to_image->frag) || too_short(&img_partner->frag)) {
-	      if (next && next->to_image->to_msp == cur_img_data->to_image->to_msp) next = next->next;
-	      dump_image(cur_img_data->to_image);
-	    }
-	    break;
-	  }
-	}
-	tbd_tmp = tbd_tmp->next;
+              cur_img_data->to_image->to_msp->score -= msp_tmp->score;
+              if (cur_img_data->to_image->to_msp->direction == 1) img_partner->frag.lb += tbd_tmp->bd - cur_img_data->to_image->frag.lb + 1;
+              else img_partner->frag.rb -= tbd_tmp->bd - cur_img_data->to_image->frag.lb + 1;
+              cur_img_data->to_image->frag.lb = tbd_tmp->bd +1;
+            }
+          }
+          if (tbd_tmp->bd >= cur_img_data->to_image->frag.rb || !tbd_tmp->next) { /* end of this image */
+            if (dissected) {
+        	fprint_msp(new_msps, cur_img_data->to_image->to_msp);
+            }
+            if (too_short(&cur_img_data->to_image->frag) || too_short(&img_partner->frag)) {
+              if (next && next->to_image->to_msp == cur_img_data->to_image->to_msp) next = next->next;
+              dump_image(cur_img_data->to_image);
+            }
+            break;
+          }
+        }
+        tbd_tmp = tbd_tmp->next;
       }
              r = clock() - r;
     double dissectTIME = ((double)r)/CLOCKS_PER_SEC;
@@ -1407,35 +1450,35 @@ void register_image(IMAGE_t *i, ELEMENT_t *ele) {
   } else {
       /*ct = count_img_nodes(i->ele_info->ele->to_img_tree);
       if (ct != i->ele_info->ele->img_no) {
-	err_no ++;
-	fprintf(log_file, "error:  image tree changed before inserting a new image: ele %d %d %d\n", i->ele_info->index, i->ele_info->ele->img_no, ct);
-	fflush(log_file);
-	exit(2);
+        err_no ++;
+        fprintf(log_file, "error:  image tree changed before inserting a new image: ele %d %d %d\n", i->ele_info->index, i->ele_info->ele->img_no, ct);
+        fflush(log_file);
+        exit(2);
       }*/
       insert_image(&i->ele_info->ele->to_img_tree, i);
       i->ele_info->ele->img_no ++;
       /*ct = count_img_nodes(i->ele_info->ele->to_img_tree);
       if (ct != i->ele_info->ele->img_no) {
-	err_no ++;
+        err_no ++;
         fprintf(log_file, "error:  trouble inserting a new image: ele %d %d %d\n", i->ele_info->index, i->ele_info->ele->img_no, ct);
-	fflush(log_file);
+        fflush(log_file);
         exit(2);
       }*/
       if (i->ele_info->ele->to_img_data) put_image(&i->ele_info->ele->to_img_data, i);
       /*ct = count_img_nodes(ip->ele_info->ele->to_img_tree);
       if (ct != ip->ele_info->ele->img_no) {
-	err_no ++;
+        err_no ++;
         fprintf(log_file, "error:  tree changed before inserting a new image: ele %d %d %d\n", ip->ele_info->index, ip->ele_info->ele->img_no, ct);
-	fflush(log_file);
+        fflush(log_file);
         exit(2);
       }*/
       insert_image(&ip->ele_info->ele->to_img_tree, ip);
       ip->ele_info->ele->img_no ++;
       /*ct = count_img_nodes(ip->ele_info->ele->to_img_tree);      
       if (ct != ip->ele_info->ele->img_no) {      
-	err_no ++;
+        err_no ++;
         fprintf(log_file, "error:  trouble inserting a new image: ele %d %d %d\n", ip->ele_info->index, ip->ele_info->ele->img_no, ct); 
-	fflush(log_file);
+        fflush(log_file);
         exit(2);      
       }*/      
       if (ip->ele_info->ele->to_img_data) put_image(&ip->ele_info->ele->to_img_data, ip);
@@ -1467,35 +1510,35 @@ void dump_image(IMAGE_t *i) {
 
     /*ct = count_img_nodes(i->ele_info->ele->to_img_tree);
     if (ct != i->ele_info->ele->img_no) {
-	err_no ++;
-	fprintf(log_file, "error:  image tree changed before deleting a node: ele %d %d %d\n", i->ele_info->index, i->ele_info->ele->img_no, ct);
-	fflush(log_file);
-	exit(2);
+        err_no ++;
+        fprintf(log_file, "error:  image tree changed before deleting a node: ele %d %d %d\n", i->ele_info->index, i->ele_info->ele->img_no, ct);
+        fflush(log_file);
+        exit(2);
     }*/
     delete_image(&i->ele_info->ele->to_img_tree, i);
     i->ele_info->ele->img_no --;
     /*ct = count_img_nodes(i->ele_info->ele->to_img_tree);
     if (ct != i->ele_info->ele->img_no) {
-	err_no ++;
+        err_no ++;
         fprintf(log_file, "error:  trouble deleting an image node: ele %d %d %d\n", i->ele_info->index, i->ele_info->ele->img_no, ct);
-	fflush(log_file);
+        fflush(log_file);
         exit(2);
     }*/
 
     /*ct = count_img_nodes(ip->ele_info->ele->to_img_tree);
     if (ct != ip->ele_info->ele->img_no) {
-	err_no ++;
+        err_no ++;
         fprintf(log_file, "error:  image tree changed before deleting a node: ele %d %d %d\n", ip->ele_info->index, ip->ele_info->ele->img_no, ct);
-	fflush(log_file);
+        fflush(log_file);
         exit(2);
     }*/
     delete_image(&ip->ele_info->ele->to_img_tree, ip);
     ip->ele_info->ele->img_no --;
     /*ct = count_img_nodes(ip->ele_info->ele->to_img_tree);
     if (ct != ip->ele_info->ele->img_no) {
-	err_no ++;
+        err_no ++;
         fprintf(log_file, "error:  trouble deleting an image node: ele %d %d %d\n", ip->ele_info->index, ip->ele_info->ele->img_no, ct);
-	fflush(log_file);
+        fflush(log_file);
         exit(2);
     }*/
     
@@ -1511,13 +1554,13 @@ void remove_image(IMAGE_t *i) {
     cur_img_data = i->ele_info->ele->to_img_data;
     while (cur_img_data != NULL) {
       if (cur_img_data->to_image == i) {
-	if (prev_img_data != NULL) {
-	  prev_img_data->next = cur_img_data->next;
-	} else {
-	  i->ele_info->ele->to_img_data = cur_img_data->next;
-	}
-	free(cur_img_data);
-	break;
+        if (prev_img_data != NULL) {
+          prev_img_data->next = cur_img_data->next;
+        } else {
+          i->ele_info->ele->to_img_data = cur_img_data->next;
+        }
+        free(cur_img_data);
+        break;
       }
       prev_img_data = cur_img_data;
       cur_img_data = cur_img_data->next;
@@ -1546,36 +1589,36 @@ void combo_update(ELE_INFO_t *ele_info) {
     ele_info->stat = 'X';
     if (ele_info->ele->edges) combo_edge_update(ele_info, &ele_info->ele->edges);
     if (ele_info->ele->edge_no) {
-	err_no ++;
-	fprintf(log_file, "error:  combo_ele %d, %d edge_node left\n", ele_info->index, ele_info->ele->edge_no);
-	fflush(log_file);
-	exit(4);
+        err_no ++;
+        fprintf(log_file, "error:  combo_ele %d, %d edge_node left\n", ele_info->index, ele_info->ele->edge_no);
+        fflush(log_file);
+        exit(4);
     }
     ele_info->ele->flimg_no = 0;
     if (ele_info->ele->PCP) CP_free(&ele_info->ele->PCP);
     if (ele_info->ele->redef) {
       if (ele_info->ele->to_img_data) {
-	err_no ++;
-	fprintf(log_file, "error re-defining ele %d, still images left\n", ele_info->index);
-	fflush(log_file);
-	exit(5);
+        err_no ++;
+        fprintf(log_file, "error re-defining ele %d, still images left\n", ele_info->index);
+        fflush(log_file);
+        exit(5);
       }
       /* all images and msps are relocated to offsprings, so img_tree_free() is enough */
       if (ele_info->ele->to_img_tree) img_tree_free(&ele_info->ele->to_img_tree, ele_info);
       if (ele_info->ele->img_no) {
-	err_no ++;
-	fprintf(log_file, "error:  combo_ele %d, %d img_node left\n", ele_info->index, ele_info->ele->img_no);
-	fflush(log_file);
-	ele_info->ele->img_no = 0;
-	exit(2);
+        err_no ++;
+        fprintf(log_file, "error:  combo_ele %d, %d img_node left\n", ele_info->index, ele_info->ele->img_no);
+        fflush(log_file);
+        ele_info->ele->img_no = 0;
+        exit(2);
       }
       combo_output(ele_info);
     } else {
       if (ele_info->ele->img_no || ele_info->ele->to_img_data || ele_info->ele->to_img_tree) {
-	err_no ++;
-	fprintf(log_file, "error:  images not cleaned in obs ele %d\n", ele_info->index);
-	fflush(log_file);
-	exit(2);
+        err_no ++;
+        fprintf(log_file, "error:  images not cleaned in obs ele %d\n", ele_info->index);
+        fflush(log_file);
+        exit(2);
       }
       else obs_output(ele_info);
     }
@@ -1621,13 +1664,13 @@ void CP_clean(CP_t **cps_p, ELE_INFO_t *cont) {
   while (cp_cur != NULL) {
     if (cp_cur->contributor == cont) {
       if (cp_prev == NULL) {
-	*cps_p = cp_cur->next;
-	free(cp_cur);
-	cp_cur = *cps_p;
+        *cps_p = cp_cur->next;
+        free(cp_cur);
+        cp_cur = *cps_p;
       } else {
-	cp_prev->next = cp_cur->next;
-	free(cp_cur);
-	cp_cur = cp_prev->next;
+        cp_prev->next = cp_cur->next;
+        free(cp_cur);
+        cp_cur = cp_prev->next;
       }
       /*res ++;*/
     } else {
@@ -1659,8 +1702,8 @@ void CP_clean(CP_t **cps_p, ELE_INFO_t *cont) {
 //        E1 -----primary-----> E2
 //            If there exists an alignment that is nearly
 //            full length (within 10bp of both ends) for
-//            either E1 or E2. Or...if more a set of partial
-//            images could be seed as part of full length
+//            either E1 or E2. Or...if a set of partial
+//            images could be seen as part of full length
 //            alignment. Edge stat='p'.
 //
 //        E1 ----secondary---> E2
@@ -1669,9 +1712,9 @@ void CP_clean(CP_t **cps_p, ELE_INFO_t *cont) {
 //
 void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     /* the core function in this part, calls everything below */
-    int eff_img_ct, i, prim;
-    int j, riteplace;
-    short ritetime;
+    int eff_img_ct, i;
+    int j, ele_block_start;
+    //short start_ele_partner;
     MSP_t *prim_p;
 
     IMG_DATA_t *cur_img_data;
@@ -1686,21 +1729,23 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     IMG_DATA_t *scovs;
 
     int32_t max_score=0;
-    short dir;
+    short dir = 0;
 
     // RMH: DEBUG TODO remove
     printf("edges_and_cps: ele_info->index = %d, ele_info->ele->index = %d\n", ele_info->index, ele_info->ele->index);
 
     /* sort unprocessed images according to their partner element,
-     * and then their left bounds to allocate proper amount of memory
-     * when update is 1, it means the element is an offspring of a combo,
+     * and then their left bounds to allocate proper amount of memory.
+     * When update is 1, it means the element is an offspring of a combo,
      * in which case all the images need to be processed; when update is 0,
      * those images whose partner is 'v' or 'w' should be omitted
      * no self-images are accepted to generate pcps or edges, updating or not
      */
-    // If to_image_data is Null generate a list version from the tree version in to_img_tree
+
+    // If to_image_data is NULL populate it with a linked list version of the image tree (to_img_tree).
     if (!cur_ele->to_img_data) listify(cur_ele->to_img_tree, &cur_ele->to_img_data);
     cur_img_data = cur_ele->to_img_data;
+
     // If element update == 1 count all non-self images otherwise only count
     // 'z' status, non-self images.
     // TODO: This is redundant with the loop below. In the future we could
@@ -1709,11 +1754,17 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     //       of img_ptr.  It could either be malloc'd afresh each time for use
     //       here or realloc'd only when the current size is exceeded.  Either
     //       way we should verify were it should be free'd.
+
+    // Process image list and count only images that map to other elements ( not ourselves ).
+    // Unless the current element is set to update, further restrict the count to images where
+    // the partner element is in the initial state ('z').
     eff_img_ct = 0;
     while(cur_img_data != NULL) {
       epi = partner(cur_img_data->to_image)->ele_info;
+      //printImage(cur_img_data->to_image);
+      //printf("Partner: index = %d\n", epi->index);
       if (epi->index != ele_info->index) {
-        if (cur_ele->update || epi->stat == 'z') eff_img_ct ++;
+        if (cur_ele->update || epi->stat == 'z') eff_img_ct++;
       }
       cur_img_data = cur_img_data->next;
     }
@@ -1721,198 +1772,338 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     printf("edges_and_cps: img_no = %d, eff_img_ct = %d\n", cur_ele->img_no, eff_img_ct);
     // RMH: end
 
-  if (eff_img_ct) {
-    token_image = (IMAGE_t *) malloc(sizeof(IMAGE_t));
-    token_image->frag.lb = 0;
-    token_image->frag.rb = 0;
-    token_image->to_msp = NULL;
-    token_image->ele_info = NULL;
-    consis_rt = (IMG_NODE_t *) malloc(sizeof(IMG_NODE_t));
-    consis_rt->to_image = token_image;
-    consis_rt->children = NULL;
-    consis_rt->sib = NULL;
+    if (eff_img_ct) {
+      token_image = (IMAGE_t *) malloc(sizeof(IMAGE_t));
+      token_image->frag.lb = 0;
+      token_image->frag.rb = 0;
+      token_image->to_msp = NULL;
+      token_image->ele_info = NULL;
+      consis_rt = (IMG_NODE_t *) malloc(sizeof(IMG_NODE_t));
+      consis_rt->to_image = token_image;
+      consis_rt->children = NULL;
+      consis_rt->sib = NULL;
 
-    if (eff_img_ct > MAX_IMG) {
-      img_ptr = (IMAGE_t **) malloc(eff_img_ct*sizeof(IMAGE_t *));
-    }
+      if (eff_img_ct > MAX_IMG) {
+        img_ptr = (IMAGE_t **) malloc(eff_img_ct*sizeof(IMAGE_t *));
+      }
 
-    cur_img_data = cur_ele->to_img_data;
-    eff_img_ct = 0;
-    // TODO: Redundant loop see above.
-    while(cur_img_data != NULL) {
-      epi = partner(cur_img_data->to_image)->ele_info;
-      if (epi->index != ele_info->index) {
-        if (cur_ele->update || epi->stat == 'z') {
-  	  *(img_ptr+eff_img_ct) = cur_img_data->to_image;
-	  eff_img_ct ++;
+      cur_img_data = cur_ele->to_img_data;
+      eff_img_ct = 0;
+      // TODO: Redundant loop see above.
+      while(cur_img_data != NULL) {
+        epi = partner(cur_img_data->to_image)->ele_info;
+        if (epi->index != ele_info->index) {
+          if (cur_ele->update || epi->stat == 'z') {
+              // Add pointer to image to the img_ptr list
+              // TODO: Could be img_ptr[eff_img_ct] = cur_img_data->to_image; for readability
+              *(img_ptr+eff_img_ct) = cur_img_data->to_image;
+            eff_img_ct ++;
+          }
         }
+        cur_img_data = cur_img_data->next;
       }
-      cur_img_data = cur_img_data->next;
-    }
-    // RMH: Sort by: difference in element identifiers, ascending
-    //               msp_direction
-    //               left bound
-    //               right bound
-    //      This considers all images from a pair of elements at a
-    //      time ( sub sort starting from img_ptr and going for eff_img_ct records ).
-    qsort(img_ptr, eff_img_ct, sizeof(IMAGE_t *), partner_cmp);
+      // RMH: Sort by: difference in **partner** element identifiers, ascending
+      //               msp_direction
+      //               left bound
+      //               right bound
+      //      This supports the processing of images in a element-pair fashion.
+      qsort(img_ptr, eff_img_ct, sizeof(IMAGE_t *), partner_cmp);
 
-    /* recognizing full-length images, and put partial and secondary
-     * images into a consistency tree, in which images connected are
-     * consistent with each other (look at the consis() function of
-     * definition of consistency)
-     */
-    ritetime = 1;
-    for (i=0; i<eff_img_ct; i++) {
-      cur_img = *(img_ptr+i);
-      img_partner = partner(cur_img);
+      // recognizing full-length images, and put partial and secondary
+      // images into a consistency tree, in which images connected are
+      // consistent with each other (look at the consis() function of
+      // definition of consistency)
 
-      // RMH: DEBUG TODO remove
-      printf("edges_and_cps: image cur_ele_info->index=%d, par_ele_info->index=%d\n", cur_img->ele_info->index, img_partner->ele_info->index );
+      ele_partner = NULL;
+      prim_p = NULL;
+      epi = NULL;
+      max_score = 0;
+      // Start of the partner element image block
+      ele_block_start = 0;
 
-      if (ritetime) { /* new ele_partner begins */
-	epi = img_partner->ele_info;
-	ritetime = 0;
-	if (!epi->ele) ele_read_in(epi, 1);
-	ele_partner = epi->ele;
-	riteplace = i;
-	prim = 0;
-	prim_p = NULL;
-	max_score = 0;
-      }
-      if (img_partner->ele_info->index == epi->index) { /* still the same partner element */
-	/* full length */
-        // RMH: Currently 0.9
-        //      So unless the sequence is < 200bp it simply requires
-        //      that the image is within 10bp of the endpoints of the element.
-	if (full_length(cur_img, CUTOFF2)) {
+      for (i=0; i<eff_img_ct; i++) {
+        cur_img = *(img_ptr+i);
+        img_partner = partner(cur_img);
+
+        epi = img_partner->ele_info;
+        if (!epi->ele) ele_read_in(epi, 1);
+        ele_partner = epi->ele;
+
+        // RMH: DEBUG TODO remove
+        printf("edges_and_cps: processing image cur_ele_info->index=%d, par_ele_info->index=%d\n", cur_img->ele_info->index, img_partner->ele_info->index );
+
+        // full length: current element
+        //   RMH: Currently CUTOFF2 is 0.9
+        //        So image must be within 10bp of both element endpoints, and for elements
+        //        < 200bp this becomes even more stringent.
+        int is_full_length = 0;
+        if (full_length(cur_img, CUTOFF2)) {
           printf("edges_and_cps:     image is primary because full_length with current element!\n");
-	  prim = 1;
+          is_full_length = 1;
           // Increment the full length image counter
-	  cur_ele->flimg_no ++;
-	}
-	if (full_length(img_partner, CUTOFF2)) {
+          cur_ele->flimg_no++;
+        }
+        // full length: partner element
+        if (full_length(img_partner, CUTOFF2)) {
           printf("edges_and_cps:     image is primary because full_length with partner element!\n");
-	  prim = 1;
+          is_full_length = 1;
           // Increment the full length image counter
-	  ele_partner->flimg_no ++;
-	}
+          ele_partner->flimg_no++;
+        }
         // If the image is full length for either/both of the
         // elements and is the highest score seen so far,
-        // save it as prim_p
-	if (prim == 1) {
-	  prim = 0;
-          // RMH: Track maximum scoring primary (full length)
-          //      image.
-	  if (cur_img->to_msp->iden > max_score) {
-            printf("edges_and_cps:     **** image is the new high scoring primary!\n");
-	    max_score = cur_img->to_msp->iden;
-	    dir = cur_img->to_msp->direction;
-	    prim_p =  cur_img->to_msp;
-	  }
-	}
+        // save it as prim_p.
         //
-	if (!prim_p) {
+        // Original code (through 1.08):
+        //      typedef struct msp {
+        //        ...
+        //        float iden;
+        //        ...
+        //      } MSP_t;
+        //      ...
+        //      int32_t max_score=0;
+        //      ...
+        //      if (prim == 1) {
+        //        prim = 0;
+        //        if (cur_img->to_msp->iden > max_score) {
+        //          max_score = cur_img->to_msp->iden;
+        //          dir = cur_img->to_msp->direction;
+        //          prim_p = cur_img->to_msp;
+        //        }
+        //      }
+        //
+        // This appears to use identity rather than score
+        // as a proxy for the quality of the alignment.  I am not
+        // sure this is what he intended.  I have modified this
+        // to use a score based on the identity *and* the length
+        // of the alignment.  This is similar to the scoring used
+        // in find_prim().
+        //
+        // Also note that in the original code the max_score was
+        // truncating the float (identity) to an integer.
+        if ( is_full_length ) {
+          // RMH: Calculate a score based on the identity of the MSP in a similar
+          //      fashion to find_prim()
+          int32_t len_sum = (cur_img->frag.rb - cur_img->frag.lb) +
+                            (img_partner->frag.rb - img_partner->frag.lb);
+          int32_t ident_score = (int32_t) cur_img->to_msp->iden * (len_sum/2);
+          // Original code
+          //if (cur_img->to_msp->iden > max_score) {
+          if (ident_score > max_score) {
+            printf("edges_and_cps:     **** image is the new high scoring (identity) primary! [%f,%d,%d]\n", cur_img->to_msp->iden, ident_score, max_score);
+            //max_score = cur_img->to_msp->iden;
+            max_score = ident_score;
+            dir = cur_img->to_msp->direction;
+            prim_p =  cur_img->to_msp;
+          }
+        }
+
+        // DEBUG
+        if (!prim_p) {
           // RMH: No full length images found yet
           //      NOTE: Prequal flag is set
-          printf("edges_and_cps:      Adding to consis tree (not full-length and no full-length found yet): e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
-	  consis_tree_build(consis_rt, cur_img, 1);
+          printf("edges_and_cps:      Adding to consis tree (not full-length and no full-length found yet): e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", cur_img->ele_info->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
+          // NOTE: This adds all non-primary images to the tree (because 'prequal=1')
+          consis_tree_build(consis_rt, cur_img, 1);
           //print_consis_tree(consis_rt);
+          //print_consis_tree_GV(consis_rt,0,0);
           //print_ascii_tree(consis_rt);
-	}
-      }
-      if (img_partner->ele_info->index != epi->index || i == eff_img_ct-1) {
-        printf("edges_and_cps:     Reached the end of the current element partner -- will reprocess this current image!\n");
-        // reached the end of the current ele_partner
-	// start a new ele_partner
-	ritetime = 1;
-        // RMH: Yikes...backing up the for loop counter here so he could reprocess this image again
-        // after setting ritetime.
-	if (img_partner->ele_info->index != epi->index) i --;
-	// finish the current ele_partner
-	if (prim_p) {
-	  prim_p->stat = 'p';
-	  prim = 1;
-	} else { // if no full-length, find partial primary images
-          // This identifies partial primary images by looking for fragments that share an outside edge
-	  prim = find_prim(consis_rt->children, CUTOFF2, ele_info->ele->frag.lb, -1, 0, 0, 0, 0, 0, &token_mark, &max_score, &dir);
-          // RMH: Debug - TODO remove
-          if ( prim )
-            printf("DEBUG: Identified partial primary image!\n");
-	}
-	/* build edge */
-	if (prim) {
-          printf("edges_and_cps:     Adding primary edge!\n");
-	  if (ele_info->index != epi->index) add_edge(ele_info, epi, 'p', max_score, dir);
-	  else {
-	    err_no ++;
-	    fprintf(log_file, "error:  self edge seen: ele %d\n", ele_info->index);
-	    fflush(log_file);
-	  }
-	  for (j=riteplace; j<=i; j++) {
-	    if ((*(img_ptr+j))->to_msp->stat == 'p') {
-	      cur_img = *(img_ptr+j);
-	      img_partner = partner(cur_img);
-              //RMH: start
-              //  Primary edge endpoints are added to CP lists
-              //printf("1: Adding CPs: %d, %d, to ele=%d\n", cur_img->frag.lb, cur_img->frag.rb, epi->index);
-              //printf("2: Adding CPs: %d, %d, to ele=%d\n", img_partner->frag.lb, img_partner->frag.rb, ele_info->index);
-              //RMH: end
-	      add_CP(&cur_ele->PCP, cur_img->frag.lb, epi);
-	      add_CP(&cur_ele->PCP, cur_img->frag.rb, epi);
-	      add_CP(&ele_partner->PCP, img_partner->frag.lb, ele_info);
-	      add_CP(&ele_partner->PCP, img_partner->frag.rb, ele_info);
-	    }
-	  }
-	} else { /* no primary images, full-length or partial */
-          printf("edges_and_cps:     Adding secondary edge!\n");
-	  if (ele_info->index != epi->index) add_edge(ele_info, epi, 's', 0, 0);
-          else {
-            err_no ++;
-            fprintf(log_file, "error:  self edge seen: ele %d\n", ele_info->index);
-	    fflush(log_file);
+        }
+
+        // Have we reached the end of image set ( e.g a set of images that share the same partner element )?
+        if ( i == eff_img_ct-1 || img_partner->ele_info->index != partner(*(img_ptr+i+1))->ele_info->index ) {
+          int found_primary = 0;
+          printf("edges_and_cps: This is the last image to process in a block\n");
+
+          // Did we locate a high scoring full-length image?
+          if (prim_p) {
+            // We did, mark the single full-length image (MSP) to the elements as primary ('p')
+            prim_p->stat = 'p';
+            found_primary = 1;
+          } else {
+            // No full-length, find partial primary images that can be seen as part of a full-length alignment
+            // NOTE: This flags all MSPs that can be seen as part of one or more full(ish)-length alignments
+            //       between the elements.  This differs from the full_length initial check, which only flags
+            //       one (highest score) MSP from the set of possible full-length MSPS.
+            //
+            //       Also, as the scoring function for the find_prim function is more lax than the full_length
+            //       function, it is *still* possible to have a single MSP be marked primary here when it
+            //       failed in full_length().
+            //
+            //    This may be a bit moot if these characteristics are not important other than to define
+            //    a single edge as "primary" between the elements.
+            //
+            printf("Calling find_prim with 0 initial score!\n");
+            // TODO: SUMMARIZE THIS ROUTINE HERE
+            // Start off with first real node below root
+            found_primary = find_prim(consis_rt->children, CUTOFF2, ele_info->ele->frag.lb, -1, 0, 0, 0, 0, 0, &token_mark, &max_score, &dir);
+            printf("Tree after find_prim:\n");
+            print_consis_tree_GV(consis_rt,0,0);
+            // RMH: Debug - TODO remove
+            if ( found_primary )
+              printf("DEBUG: Identified partial primary image!\n");
           }
-	}
-	if (consis_rt->children != NULL) {
-          printf("Freeing tree!\n");
-	  consis_tree_free(consis_rt->children);
-	  consis_rt->children = NULL;
-	}
-      }else { printf("NOT SURE\n"); }
-    }
-//printf("printing edge tree\n");
-//print_edge_tree(ele_info->ele->edges, 0);
 
-    if (eff_img_ct > MAX_IMG) {
-      free(img_ptr);
-    }
-    free(consis_rt);
-    free(token_image);
-  }
+          // Build graph edge
+          //   The graph is represented by edges between pairs of elements.  Pointers to an edge
+          //   are stored in both element's edge binary trees by edge_index value.  E.g.
+          //
+          //              E1 --------------------------> E2
+          //                        max_score
+          //                        edge_index
+          //
+          //    Edge:
+          //       index: 10,
+          //       score: 100,
+          //       direction: 1,
+          //       status: 'p'
+          //
+          //     The use of a binary tree is at first glance a bit odd, as the inserted edges
+          //     will initially be in sorted order ( edge_index is incremented as we build the
+          //     graph ) -- this is equivalent to a linked list but in tree form.  Zhirong could
+          //     have used an AVL or Red/Black tree here but chose instead to rebalance the tree
+          //     at the end using an array and a divide and conquer approach.  Not sure why he
+          //     didn't store the edges in an array to begin with.
+          //
+          if ( found_primary ) {
+            printf("edges_and_cps:     Adding primary edge! with max_score = %d\n", max_score);
 
-  if (ele_info->ele->edges) adjust_edge_tree(ele_info);
+            // Add primary edge to the pair of elements
+            if (ele_info->index != epi->index){
+              // Store edge information in binary trees in both ele_info->edges and epi->edges.
+              // Stored by edge_index which is a GLOBAL variable!
+              // TODO: stomp out globals
+              add_edge(ele_info, epi, 'p', max_score, dir);
+            }else {
+              err_no ++;
+              fprintf(log_file, "error:  self edge seen: ele %d\n", ele_info->index);
+              fflush(log_file);
+            }
 
-  cur_ele->update = 0;
-  ele_info->stat = 't';
+            // Record the primary image start/end points to both current and partner elements
+            // E.g:
+            //      images/msps:
+            //          E1 100-200 ---  E2 300-400
+            //          E1 50-300  ---  E2 200-440
+            //          E1 1-100   ---  E3 157-250
+            //
+            //  Adds to the front of the linked list ( ie. unshift )
+            //  E1->PCP:  [1,e3]-->[100,e3]-->[50,e2]-->[300,e2]-->[100,e2]-->[200,e2]
+            //  E2->PCP:  [200,e1]-->[440,e1]-->[300,e1]-->[400,e1]
+            //  E3->PCP:  [157,e1]-->[250,e1]
+            //
+            for (j=ele_block_start; j<=i; j++) {
+              if ((*(img_ptr+j))->to_msp->stat == 'p') {
+                cur_img = *(img_ptr+j);
+                img_partner = partner(cur_img);
+                //RMH: start
+                //  Primary edge endpoints are added to CP lists
+                //printf("1: Adding CPs: %d, %d, to ele=%d\n", cur_img->frag.lb, cur_img->frag.rb, epi->index);
+                //printf("2: Adding CPs: %d, %d, to ele=%d\n", img_partner->frag.lb, img_partner->frag.rb, ele_info->index);
+                //RMH: end
+                add_CP(&cur_ele->PCP, cur_img->frag.lb, epi);
+                add_CP(&cur_ele->PCP, cur_img->frag.rb, epi);
+                add_CP(&ele_partner->PCP, img_partner->frag.lb, ele_info);
+                add_CP(&ele_partner->PCP, img_partner->frag.rb, ele_info);
+              }
+            }
+          } else { // no primary images, full-length or partial
+            // Add secondary edge to the pair of elements
+            printf("edges_and_cps:     Adding secondary edge!\n");
+            if (ele_info->index != epi->index) add_edge(ele_info, epi, 's', 0, 0);
+            else {
+              err_no ++;
+              fprintf(log_file, "error:  self edge seen: ele %d\n", ele_info->index);
+              fflush(log_file);
+            }
+          }
+
+          // Free the consistency tree for this pair of elements
+          if (consis_rt->children != NULL) {
+            int released = consis_tree_free(consis_rt->children);
+            printf("Freeing tree!: %d released\n", released);
+            consis_rt->children = NULL;
+          }
+
+          // Reset the primary image and the max score
+          ele_partner = NULL;
+          prim_p = NULL;
+          epi = NULL;
+          max_score = 0;
+          // Set the start of the next element image block
+          ele_block_start = i+1;
+
+        }// if reached the start of a new ele_partner
+
+      } // for (i=0; i<eff_img_ct; i++)
+
+
+  // DEBUG
+  printf("PCP list:\n");
+  print_cp_list(cur_ele->PCP);
+  printf("printing edge tree\n");
+  print_edge_tree(ele_info->ele->edges, 0);
+  // END DEBUG
+
+      if (eff_img_ct > MAX_IMG) {
+        free(img_ptr);
+      }
+      free(consis_rt);
+      free(token_image);
+    } // if eff_img_ct
+
+    // This appears to rebuild the edge tree by reordering the edges
+    // (assuming they are already sorted by index) into a balanced binary tree.
+    // Strangely it does this by taking an (ordered) tree structure like so:
+    //
+    //      2
+    //       \
+    //        10
+    //          \
+    //           11
+    //            \
+    //             42
+    //
+    // Converting it to an array:  2, 10, 11, 42
+    //
+    // and back to a tree structure but in the format of a balanced binary tree:
+    //
+    //         11
+    //        /  \
+    //      10    42
+    //      /
+    //     2
+    printf("EDGE TREE Pre-adjustment\n");
+    print_edge_tree_TEXT(ele_info->ele->edges, 0, "");
+    if (ele_info->ele->edges) adjust_edge_tree(ele_info);
+    printf("EDGE TREE Post-adjustment\n");
+    print_edge_tree_TEXT(ele_info->ele->edges, 0, "");
+
+    cur_ele->update = 0;
+    ele_info->stat = 't';
 }
 
 
 
+// Current state:
+//    Full Length = image reaches within 10bp of both ends of the
+//    element *and* the ratio of the image size to the element size
+//    is > than CUTOFF2 (0.9).  The CUTOFF is only applicable to
+//    sequences < 200bp.
+//
+//    The effect of CUTOFF2 is therefore, is to prohibit anything but
+//    full length images for elements < 200bp.
+//
 int full_length(IMAGE_t *i, float cutoff) {
   if (!i->ele_info->ele) {
     err_no ++;
     fprintf(log_file, "error:  element %d not in memory\n", i->ele_info->index);
     fflush(log_file);
+    // TODO: WHY IS THIS HERE?
     // RMH: Looks like this could have recovered here, but exited instead.
     exit(3);
     ele_read_in(i->ele_info, 1);
   }
-  // If the image is within 10 bp of the start/end of the
-  // element to which it belongs, and the ratio of
-  // the image's size to the element's size is > cutoff
-  //
-  // For 0.9 cutoff this is only being more stringent
-  // for sequences < 200bp.  Not sure why they did that.
   if ( i->frag.lb - i->ele_info->ele->frag.lb < 10 &&
        i->frag.rb - i->ele_info->ele->frag.rb > -10 &&
        ((float)i->frag.rb - i->frag.lb) / (i->ele_info->ele->frag.rb - i->ele_info->ele->frag.lb) > cutoff) {
@@ -1933,10 +2124,12 @@ void add_CP(CP_t **CP_ptr, int32_t cp, ELE_INFO_t *cont) {
 
 
 
+// USES GLOBALS!!!
 void add_edge(ELE_INFO_t *ele1_info, ELE_INFO_t *ele2_info, char type, int32_t score, short dir) {
   EDGE_t *new = EDGE_malloc();
   int ct;
 
+  // TODO: Yikes...global!
   edge_index ++;
   new->index = edge_index;
   new->ele1_info = ele1_info;
@@ -1982,7 +2175,27 @@ void add_edge(ELE_INFO_t *ele1_info, ELE_INFO_t *ele2_info, char type, int32_t s
 
 
 
-
+// This appears to rebuild the edge tree by reordering the edges
+// (assuming they are already sorted by index) into a balanced binary tree.
+// Strangely it does this by taking an (ordered) tree structure like so:
+//
+//      2
+//       \
+//        10
+//          \
+//           11
+//            \
+//             42
+//
+// Converting it to an array:  2, 10, 11, 42
+//
+// and back to a tree structure but in the format of a balanced binary tree:
+//
+//         11
+//        /  \
+//      10    42
+//      /
+//     2
 void adjust_edge_tree(ELE_INFO_t *ele_info) {
   EDGE_t **edge_array;
   int ct, ct1;
@@ -2025,6 +2238,7 @@ void adjust_edge_tree(ELE_INFO_t *ele_info) {
 
 
 
+// Depth first search of edge tree adding a pointer to each edge to the edge_array
 int charge_edge_array(EDGE_t **edge_array, EDGE_TREE_t *rt, int pos) {
   if (rt->l) pos = charge_edge_array(edge_array, rt->l, pos);
 
@@ -2043,58 +2257,50 @@ int charge_edge_array(EDGE_t **edge_array, EDGE_TREE_t *rt, int pos) {
  * functions for building the consis_tree *
  ******************************************/
 
-
-// RMH - debug function to view consistency tree
-int print_consis_tree(IMG_NODE_t *rt) {
-  int level = 0;
-  IMG_NODE_t *child_rt;
-  IMG_NODE_t *sib_rt;
-  if ( rt->sib != NULL )
-    printf("c_tree: level=%d [(null):0:0-0] ( has sibs )\n",level);
-  else
-    printf("c_tree: level=%d [(null):0:0-0]\n",level);
-  level++;
-  child_rt = rt->children;
-  while ( child_rt != NULL ) {
-    printf("c_tree: level=%d [%s:%d:%d-%d]",level, child_rt->to_image->frag.seq_name, child_rt->to_image->to_msp->direction,  child_rt->to_image->frag.lb, child_rt->to_image->frag.rb);
-    sib_rt = child_rt->sib;
-    while ( sib_rt != NULL )
-    {
-      if ( sib_rt->children == NULL )
-        printf(", image %s:%d:%d-%d", sib_rt->to_image->frag.seq_name, sib_rt->to_image->to_msp->direction, sib_rt->to_image->frag.lb, sib_rt->to_image->frag.rb);
-      else
-        printf(", image %s:%d:%d-%d(*)", sib_rt->to_image->frag.seq_name, sib_rt->to_image->to_msp->direction, sib_rt->to_image->frag.lb, sib_rt->to_image->frag.rb);
-      sib_rt = sib_rt->sib;
-    }
-    printf("\n");
-    level++;
-    child_rt = child_rt->children;
-  }
-  return 0;
-}
-
 // RMH: Insert images into a tree
 //      Unique images ( e.g non overlapping ) get placed on
 //      a distinct level in the tree whereas overlapping images
 //      are placed on the same level.
+//
+//  NOTE:
+//      The tree may contain overlapping images on different
+//      strands.
+//
 int consis_tree_build(IMG_NODE_t *rt, IMAGE_t *im, int prequal) {
   int sum=0;
   IMG_NODE_t *nex_rt, *node;
-  // RMH: If first call ( prequal = 1 ) or no significant overlap
+  // Upon the first call to this function prequal is set to 1. This
+  // supports having a top level tree node that is not compared to the
+  // incoming image.
+  //
+  //  NOTE: It looks like it was setup by Zhirong go to support including
+  //        overlapping elements as siblings "sib" on the same level.
   if (prequal || consis(rt->to_image, im, CUTOFF2)) {
+    if ( prequal ) {
+      printf("consis_tree_build(top_level, prequal=1)\n");
+      printImage(im);
+    }else {
+      printf("Adding image because consis=1\n");
+      printImage(im);
+    }
     //if ( !prequal )
     //  printf("consis_tree_build: Found consis: im %s:%d-%d and rt %s:%d-%d\n", im->frag.seq_name, im->frag.lb, im->frag.rb, rt->to_image->frag.seq_name, rt->to_image->frag.lb, rt->to_image->frag.rb);
+    // Take child and and if it's not null, consider it's siblings
     nex_rt = rt->children;
     while (nex_rt != NULL) {
+      printf("Here we are\n");
+      printImage(nex_rt->to_image);
       sum += consis_tree_build(nex_rt, im, 0);
       nex_rt = nex_rt->sib;
     }
+    printf("SUM = %d\n", sum);
     if (!sum) {
       node = (IMG_NODE_t *) malloc(sizeof(IMG_NODE_t));
       node->recorded = 0;
       node->to_image = im;
       node->sib = NULL;
       node->children = NULL;
+      // Take the child node and if its not null add the new node to the siblings list
       *node_entry(&rt->children) = node;
       sum = 1;
     }
@@ -2113,24 +2319,14 @@ int consis_tree_build(IMG_NODE_t *rt, IMAGE_t *im, int prequal) {
 int consis(IMAGE_t *i1, IMAGE_t *i2, float cutoff) {
   int res = 0;
   IMAGE_t *ip1 = partner(i1), *ip2 = partner(i2);
+  printf("consis: %s:%d-%d dir=%d and %s:%d-%d dir=%d \n", i1->frag.seq_name, i1->frag.lb, i1->frag.rb, i1->to_msp->direction, i2->frag.seq_name, i2->frag.lb, i2->frag.rb, i2->to_msp->direction);
   if (i1->ele_info->index == i2->ele_info->index &&
       ip1->ele_info->index == ip2->ele_info->index &&
       i1->to_msp->direction == i2->to_msp->direction) {
     if (i1->to_msp->direction == 1) {
-      // RMH: If either image or its partners start at the same
-      //      position ( regardless of sequence name? ) they probably
-      //      overlap by too much.  This looks like an optimization
-      //      to avoid calling sing_cov.  But what if they are not
-      //      the same sequence?  I guess that doesn't happen very
-      //      often...still it probably should be checked.  For instance
-      //      what if we use RECON to compare seqeunces representing elements
-      //      of various families.  Then the sequences would be short enough
-      //      to perhaps start at the same # even by chance without checking
-      //      the sequence name.
-      //RMH: Testing why this condition was used
-      //if ((i1->frag.lb - i2->frag.lb)*(ip1->frag.lb - ip2->frag.lb) == 0)
-      //  if ( i1->frag.seq_name != i2->frag.seq_name )
-      //    printf("*****OOPs...this probably should have returned 1!\n");
+      // This is an optimisation to avoid calling sing_cov when its not necessary.
+      // The result of this test is negative if the two msps do not agree on orientation
+      // and are therefore not consistent with each other.
       if ((i1->frag.lb - i2->frag.lb)*(ip1->frag.lb - ip2->frag.lb) > 0) {
         // RMH: If overlap between two images is >= cutoff * the length
         //      of either sequence. NOTE: sing_cov does check sequence
@@ -2138,21 +2334,23 @@ int consis(IMAGE_t *i1, IMAGE_t *i2, float cutoff) {
         //      Here cutoff is 0.9.  Therefore below we return 1 if
         //      the two images ( and their pairs ) overlap less than
         //      0.1 * the length of either.
-	if (!sing_cov(&i1->frag, &i2->frag, 1.0-cutoff) &&
+        if (!sing_cov(&i1->frag, &i2->frag, 1.0-cutoff) &&
             !sing_cov(&ip1->frag, &ip2->frag, 1.0-cutoff)) {
           // Do not overlap significantly for either element
-	  res = 1;
-	}
-      }
+          res = 1;
+        }
+      }else { printf("consis: Inconsistent orientation!\n"); }
     } else {
+      // Same as above but for reverse orientation
       if ((i1->frag.lb - i2->frag.lb)*(ip1->frag.rb - ip2->frag.rb) < 0) {
-	if (!sing_cov(&i1->frag, &i2->frag, 1.0-cutoff) && !sing_cov(&ip1->frag, &ip2->frag, 1.0-cutoff)) {
+        if (!sing_cov(&i1->frag, &i2->frag, 1.0-cutoff) && !sing_cov(&ip1->frag, &ip2->frag, 1.0-cutoff)) {
           // Do not overlap significantly for either element
-	  res = 1;
-	}
-      }
+          res = 1;
+        }
+      }else { printf("consis: Inconsistent orientation!\n"); }
     }
   }
+  printf("consis: Returning: %d\n", res);
   return res;
 }
 
@@ -2168,14 +2366,17 @@ IMG_NODE_t ** node_entry(IMG_NODE_t **node_pp) {
 
 
 
-void consis_tree_free(IMG_NODE_t *rt) {
+int consis_tree_free(IMG_NODE_t *rt) {
+  int count = 0;
   if (rt->sib != NULL) {
-    consis_tree_free(rt->sib);
+    count += consis_tree_free(rt->sib);
   } 
   if (rt->children != NULL) {
-    consis_tree_free(rt->children);
+    count += consis_tree_free(rt->children);
   }
   free(rt);
+  count ++;
+  return count;
 }
 
 
@@ -2189,72 +2390,17 @@ void consis_tree_free(IMG_NODE_t *rt) {
   I. function for finding primary images from the consis_tree
 */
 
-#if 0
-int find_prim(IMG_NODE_t *nd, float cutoff, int32_t score, int32_t hist, short which, int32_t *sc, short *d) {
-  IMG_NODE_t *nex_node;
-  int sum = 0;
-  short level, further = 0;
-  IMAGE_t *img_partner;
-
-  if (!hist) level = 1;
-  hist += nd->to_image->frag.rb - nd->to_image->frag.lb;
-  
-  if (level && hist) { /* if first image in a path isn't EOE, forget the path */
-    if (nd->to_image->frag.lb - nd->to_image->ele_info->ele->frag.lb < MARGIN) {
-      which = 1;
-    }
-    img_partner = partner(nd->to_image);
-    if (nd->to_image->to_msp->direction == 1) {
-      if (img_partner->frag.lb - img_partner->ele_info->ele->frag.lb < MARGIN) {
-	which += 2;
-      }
-    } else {
-      if (img_partner->frag.rb - img_partner->ele_info->ele->frag.rb > -MARGIN) {
-	which += 2;
-      }
-    }
-    if (!which) return 0;
-  }
-
-  if (nd->children != NULL) {
-    nex_node = nd->children;
-    while (nex_node != NULL) {
-      sum += find_prim(nex_node, cutoff, score, hist, which, sc, d);
-      nex_node = nex_node->sib;
-    }
-    if (sum && hist) {
-      nd->to_image->to_msp->stat = 'p'; /* p stands for primary, NOT partial */
-    }
-  } else { /* the last image goes to EOE on the same element as the first image in the path */
-    if ((which == 1 || which == 3) && nd->to_image->frag.rb - nd->to_image->ele_info->ele->frag.rb > -MARGIN  && (float) hist/(nd->to_image->ele_info->ele->frag.rb - nd->to_image->ele_info->ele->frag.lb) > cutoff) {
-      further = 1;
-    } else {
-      img_partner = partner(nd->to_image);
-      if ((which == 2 || which == 3) && (float) hist/(img_partner->ele_info->ele->frag.rb - img_partner->ele_info->ele->frag.lb) > cutoff) {
-	if (nd->to_image->to_msp->direction == 1) {
-	  if (img_partner->frag.rb - img_partner->ele_info->ele->frag.rb > -MARGIN) further = 1;
-	} else {
-	  if (img_partner->frag.lb - img_partner->ele_info->ele->frag.lb < MARGIN) further = 1;
-	}
-      }
-    }
-    if (further) {
-      nd->to_image->to_msp->stat = 'p';
-      score += nd->to_image->to_msp->score;
-      if (score > *sc) {
-	*sc = score;
-	*d = nd->to_image->to_msp->direction;
-      }
-      sum = 1;
-    } else {sum = 0;}
-  }
-
-  return sum;
-}
-#endif
-
-
-
+// Given an alignment consistency tree between two elements, this function identifies
+// a path(s) that satisifies the following conditions:
+//
+// The images in the path(s) are marked as "p" (primary) and ...
+//
+// A consistency tree is defined as a tree where
+//
+// This is called when there are no full-length images found for a pair of elements.
+// That is...there are no images that reach within 10bp (or lower for elements < 200bp
+// see CUTOFF2) of both ends of the element.
+//
 // Initially called with
 //       end1 = ele->frag.lb, and end2 = -1
 //       efl1 = 0, efl2 = 0
@@ -2262,40 +2408,67 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t score, int32_t hist, short w
 //       score = 0
 // Making a guess here...but int32_t is probably not adequate in some instances for al1/al2 and probably
 // has caused problems where overflow occurs.
-int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t efl1, int32_t efl2, int32_t al1, int32_t al2, int32_t score, int *pmarkp, int32_t *sc, short *d) {
+//
+//    end2 = -1 is a flag to indicate the first alignment in the group (initial call to find_prim)
+//
+// Hardcoded values:
+//    Edge gap cutoff = 10bp
+//    Len differences = efl1-al1 < 30 || efl2-al2 < 30
+//
+int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2,
+              int32_t efl1, int32_t efl2, int32_t al1, int32_t al2,
+              int32_t score, int *pmarkp, int32_t *sc, short *d) {
   int sum = 0, mark=0;
   int32_t skip1, skip2, len1, len2;
   IMAGE_t *ipt;
 
+  // Proccess siblings first ( inconsistent sequences that form alternate paths )
   if (nd->sib) sum += find_prim(nd->sib, cutoff, end1, end2, efl1, efl2, al1, al2, score, pmarkp, sc, d);
 
   ipt = partner(nd->to_image);
-  // end2 is the partner element's right bound ( positive strand )
-  if (end2 < 0) { /*first alignment in the group*/
-    if (nd->to_image->to_msp->direction == 1) end2 = ipt->ele_info->ele->frag.lb;
-    else end2 = ipt->ele_info->ele->frag.rb;
+  // Reminder...these values are absolute positions provided in the msps file.  So an element/image
+  // boundaries do not necessarily start at 1.
+  if (end2 < 0) { //first alignment in the group
+    // direction = 1 is positive strand
+    // direction = -1 is negative strand
+    if (nd->to_image->to_msp->direction == 1)
+      end2 = ipt->ele_info->ele->frag.lb;
+    else
+      end2 = ipt->ele_info->ele->frag.rb;
   }
 
+  // "end1/end2" is a bit of a misnomer.  Here this represents
+  //  end1 = the left bound of the element ( ele_info->ele->frag.lb )
+  //  end2 = the left bound of the partner element
+  //printf("find_prim:  end1=%d, end2=%d, nd->direction = %d, efl1=%d, efl2=%d, al1=%d, al2=%d, score=%d, mark=%d, sc=%d, d=%d\n", end1, end2, nd->to_image->to_msp->direction, efl1, efl2, al1, al2, score, mark, *sc, *d);
+  //printf("nd image:\n");
+  //printImage(nd->to_image);
+
+  // Determine the starting gap for each image (relative to each element):
   // skip1 is the image's left bound - element's left bound
   //    - So == 0 if they are the same, <0 if the image extends beyond the element
   //      and >0 if it starts later than the element's left bound.
-  // skip2 is the partner element's right bound - the partner image's right bound
-  //    - So == 0 if they are the same, <0 if the image extends past the bound, and
-  //      >0 if it doesn't reach the end.
+  // skip2 is the partner element's left bound - the partner image's left bound
+  //    - So == 0 if they are the same, <0 if the image extends beyond the partner element
+  //      and >0 if it starts later than the element's left bound.
   skip1 = nd->to_image->frag.lb - end1;
-  if (nd->to_image->to_msp->direction == 1) skip2 = ipt->frag.lb - end2;
-  else skip2 = end2 - ipt->frag.rb;
+  if ( nd->to_image->to_msp->direction == 1 )
+    skip2 = ipt->frag.lb - end2;
+  else
+    skip2 = end2 - ipt->frag.rb;
+  //printf("    frag.lb = %d, frag.rb = %d, ipt->frag.lb = %d, ipt->frag.rb = %d, skip1 = %d, skip2 = %d\n", nd->to_image->frag.lb, nd->to_image->frag.rb, ipt->frag.lb, ipt->frag.rb, skip1, skip2);
 
-  // If we *start* with a gap **AND** our partner *ends* with a gap
+  // If we *start* with a gap **AND** our partner *starts* with a gap
   // ( > 10bp ) add the gaps to the efls.
   //
   //   |-----ele1--------|        |------ele2---------|
-  //     >10 |--img1-...           ....-----img2-| >10
+  //     >10 |--img1-...            >10 |--img2-...
   //
   if (skip1>10 && skip2>10) {
     efl1 += skip1;
     efl2 += skip2;
   }
+
   // Add the length of the actual images to the efls
   len1 = nd->to_image->frag.rb - nd->to_image->frag.lb;
   len2 = ipt->frag.rb - ipt->frag.lb;
@@ -2311,13 +2484,20 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
 
   if (nd->children) {
     end1 = nd->to_image->frag.rb;
-    if (nd->to_image->to_msp->direction == 1) end2 = ipt->frag.rb;
-    else end2 = ipt->frag.lb;
+    if (nd->to_image->to_msp->direction == 1)
+      end2 = ipt->frag.rb;
+    else
+      end2 = ipt->frag.lb;
+    //printf("find_prim: Calling children with end1=%d end2=%d\n", end1, end2);
     sum += find_prim(nd->children, cutoff, end1, end2, efl1, efl2, al1, al2, score, &mark, sc, d);
-  } else { /*last alignment in group*/
+  } else {  // last alignment in path
+    //printf("find_prim: Last alignment in group\n");
     skip1 = nd->to_image->ele_info->ele->frag.rb - nd->to_image->frag.rb;
-    if (nd->to_image->to_msp->direction == 1) skip2 = ipt->ele_info->ele->frag.rb - ipt->frag.rb;
-    else skip2 = ipt->frag.lb - ipt->ele_info->ele->frag.lb;
+    if (nd->to_image->to_msp->direction == 1)
+      skip2 = ipt->ele_info->ele->frag.rb - ipt->frag.rb;
+    else
+      skip2 = ipt->frag.lb - ipt->ele_info->ele->frag.lb;
+
     // If we *end* with a gap **AND** our partner *starts* with a gap
     // ( > 10bp ) add the gaps to the efls.
     //
@@ -2329,35 +2509,43 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
       efl2 += skip2;
     }
 
-
-    //   |-----ele1--------|        |------ele2---------|
-    //
-    // Case 1:
-    //     >10 |-img1-| >10           >10 |-img2-| >10
-    //   efl1 = ~length(ele1)         efl1 = ~length(ele2)
-    //
-    // Case 2:
-    //   |--img1---|  >10             >10      |-img2---|
-    //   efl1 = ~length(ele1)         efl1 = ~length(ele2)
-    //
-    // Case 3:
-    //    >10    |--img1---|        |-img2---| > 10
-    //   efl1 = ~length(ele1)         efl1 = ~length(ele2)
-    //
-    // Case 4:  Good primary candidate
-    //    >10    |--img1---|         >10      |--img2---|
-    //   efl1 = ~length(img1)         efl1 = ~length(img2)
-    //
-    // Case 5:  Good primary candidate
-    //   |--img1---|   >10          |--img2---|    >10
-    //   efl1 = ~length(img1)         efl1 = ~length(img2)
-    //
-    /*if (1.0*al1/efl1 > cutoff || 1.0*al2/efl2 > cutoff) {*/
     // RMH: DEBUG TODO remove
-    printf("al1=%d al2=%d efl1=%d efl2=%d:  al/ef %f, %f   ef-al %d, %d  ele:%d-%d, ptn:%d-%d\n", al1, al2, efl1, efl2,(1.0*al1/efl1), (1.0*al2/efl2), (efl1-al1), (efl2-al2), nd->to_image->ele_info->ele->frag.lb, nd->to_image->ele_info->ele->frag.rb, ipt->ele_info->ele->frag.lb, ipt->ele_info->ele->frag.rb );
+    //printf("al1=%d al2=%d efl1=%d efl2=%d:  al/ef %f, %f   ef-al %d, %d  ele:%d-%d, ptn:%d-%d\n", al1, al2, efl1, efl2,(1.0*al1/efl1), (1.0*al2/efl2), (efl1-al1), (efl2-al2), nd->to_image->ele_info->ele->frag.lb, nd->to_image->ele_info->ele->frag.rb, ipt->ele_info->ele->frag.lb, ipt->ele_info->ele->frag.rb );
     // RMH: end
+
+    //  Currently cutoff = 0.9
+    //     So this appears to be checking that the alignment covers at least 90% of one or the other element **AND**
+    //     it's less than 30bp short of the full length of one or the other element.
+    //     The 30bp check was added in RECON1.03 (no reason given)
+    //        Pre 1.03 code:
+    //           if (1.0*al1/efl1 > cutoff || 1.0*al2/efl2 > cutoff) {
+    //
+    //     So what do al# and efl# represent?
+    //     al# = actual length of the alignment or
+    //
+    //         |----------------------- element (500bp) ---------------------------------|
+    //             |----alignment (42bp)----|      |----alignment (100bp)----|
+    //
+    //     al1 = 42 + 100 = 142
+    //
+    //     Instead of considering the aligned fraction of the element length it seems to be
+    //     considering the aligned fraction of a (potentially) shorter element length
+    //     (perhaps "effective length" or efl#).
+    //
+    //         |----------------------- element (500bp) ---------------------------------|
+    //         ..9bp..|--alignment (42bp)--|..100bp..|--alignment (100bp)--|....249bp.....
+    //
+    //      The effective length is the length of the alignments + the length of any gaps
+    //      exceeding 10bp.
+    //
+    //      efl1 = 42 + 100 + 100 + 249 = 491
+    //
+    //  So the ratio is :
+    //
+    //       al1/efl1 = 142/491 = 0.289, so not > cutoff (0.9)
+    //
     if ( (1.0*al1/efl1 > cutoff || 1.0*al2/efl2 > cutoff) && (efl1-al1 < 30 || efl2-al2 < 30) ) {
-      sum = 1;
+      sum = 1; // Shouldn't this be += 1?
       mark = 1;
       if ( (al1+al2) == 0 )
       {
@@ -2371,15 +2559,20 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
       }
       score = score*2/(al1+al2);
       if (score > *sc) {
-	*sc = score;
-	*d = nd->to_image->to_msp->direction;
+        *sc = score;
+        *d = nd->to_image->to_msp->direction;
       }
+      printf("find_prim: Found a primary alignment path: score = %d, dir = %d\n", score, *d);
     }
   }
+  // Marks all images in the path as primary ( upon recursion back up the tree )
   if (mark) {
+      //printf("find_prim: Marking alignment as primary:\n");
+      //printImage(nd->to_image);
       nd->to_image->to_msp->stat  = 'p';
       *pmarkp = 1;
   }
+  //printf("find_prim: Returning sum = %d\n", sum);
   return sum;
 }
 
@@ -2503,10 +2696,10 @@ int frag_cmp(const void *i1, const void *i2) {
   return res;
 }
 
-// RMH: Sort by: difference in element identifiers, ascending
+// RMH: Sort by: difference in partner element identifiers, ascending
 //               msp_direction
-//               left bound
-//               right bound
+//               primary left bound
+//               primary right bound
 //
 int partner_cmp(const void *i1, const void *i2) {
   int res = partner(*((IMAGE_t **)i1))->ele_info->index - partner(*((IMAGE_t **)i2))->ele_info->index;
@@ -2536,3 +2729,141 @@ int BD_cmp(const void *bd1, const void *bd2) {
 int fam_cmp(const void *fd1, const void *fd2) {
   return (*((FAM_DATA_t **) fd1))->to_family->index - (*((FAM_DATA_t **) fd2))->to_family->index;
 }
+
+
+void test_consis_tree(){
+  IMAGE_t *token_image, *new_image;
+  IMG_NODE_t *consis_rt;
+  MSP_t *msp_tmp;
+  ELE_INFO_t *ele1, *ele2;
+  ELEMENT_t *ele1_ele, *ele2_ele;
+
+  // Top-level token image
+  token_image = (IMAGE_t *) malloc(sizeof(IMAGE_t));
+  token_image->frag.lb = 0;
+  token_image->frag.rb = 0;
+  token_image->to_msp = NULL;
+  token_image->ele_info = NULL;
+
+  // consistency tree
+  consis_rt = (IMG_NODE_t *) malloc(sizeof(IMG_NODE_t));
+  consis_rt->to_image = token_image;
+  consis_rt->children = NULL;
+  consis_rt->sib = NULL;
+
+  // Elements
+  ele1_ele = (ELEMENT_t *) malloc(sizeof(ELEMENT_t));
+  ele1_ele->index = 1;
+  ele1_ele->frag.lb = 1;
+  ele1_ele->frag.rb = 305;
+  ele1_ele->TBD = NULL;
+  ele1_ele->redef = NULL;
+  ele1_ele->direction = 1;
+
+  ele1 = (ELE_INFO_t *) malloc(sizeof(ELE_INFO_t));
+  ele1->index = 1;
+  ele1->ele = ele1_ele;
+  ele1->stat = 'z';
+  ele1->next = NULL;
+
+  ele2_ele = (ELEMENT_t *) malloc(sizeof(ELEMENT_t));
+  ele1_ele->index = 2;
+  ele2_ele->frag.lb = 1;
+  ele2_ele->frag.rb = 1000;
+  ele2_ele->TBD = NULL;
+  ele2_ele->redef = NULL;
+  ele2_ele->direction = 1;
+
+  ele2 = (ELE_INFO_t *) malloc(sizeof(ELE_INFO_t));
+  ele2->index = 2;
+  ele2->ele = ele2_ele;
+  ele2->stat = 'z';
+  ele2->next = NULL;
+
+  typedef struct {
+    int direction;
+    int iden;
+    int sbjct_lb;
+    int sbjct_rb;
+    int query_lb;
+    int query_rb;
+  } MSPParams;
+
+  // Sorted by direction then subject start
+  MSPParams msp_params[] = {
+    // This should generate:
+    //   c_tree: level=0 [(null):0:0-0]
+    //   c_tree: level=1 e1:(null):1:8-150 to e2:(null):1:40-200 : siblings[]
+    //   c_tree: level=2 e1:(null):1:155-200 to e2:(null):1:400-500 : siblings[]
+    //   c_tree: level=3 e1:(null):1:205-303 to e2:(null):1:600-700 : siblings[]
+    //
+    // And find a simple primary path with all three ( score = 62 )
+    //
+    //                      el1=1-305         ele2=1-1000
+    // direction, iden, sbjct_lb, sbjct_rb, query_lb, query_rb
+    // ---------  ----   -------  --------  --------  --------
+    //{1,           60,      8,        150,      40,      200},
+    //{1,          100,     155,       200,     400,      500},
+    //{1,           40,     205,       303,     600,      700},
+    //
+    // This is more complex.  There is an inconsistency between the
+    // ordering in e1/e2.  This generates:
+    //
+    //   c_tree: level=0 [(null):0:0-0]
+    //   c_tree: level=1 e1:(null):1:8-150 to e2:(null):1:400-500 : siblings[(null):1:155-200(*e1:205),]
+    //   c_tree: level=2 e1:(null):1:205-303 to e2:(null):1:600-700 : siblings[]
+    //
+    //                      el1=1-305         ele2=1-1000
+    // direction, iden, sbjct_lb, sbjct_rb, query_lb, query_rb
+    // ---------  ----   -------  --------  --------  --------
+    {1,           30,      1,        80,     400,      500},
+    {1,           60,      1,        150,     400,      500},
+    {1,           30,      81,        180,     501,      599},
+    {-1,          13,      85,        200,     1,        2  },
+    {1,          100,    151,       200,      501,      599},
+    {1,           30,      181,        305,     600,      650},
+    {1,           40,     201,       305,     600,      700},
+
+  };
+
+  // It appears as if combining +/- strand msps in this structure
+  // is not what we want to do.  They probably should be
+  // handled seperately.
+
+  for (int i = 0; i < sizeof(msp_params) / sizeof(msp_params[0]); i++) {
+    MSP_t *msp_tmp = (MSP_t *) malloc(sizeof(MSP_t));
+    msp_tmp->direction = msp_params[i].direction;
+    msp_tmp->stat = '\0';
+    msp_tmp->iden = msp_params[i].iden;
+    msp_tmp->score = 0;
+    msp_tmp->sbjct.frag.lb = msp_params[i].sbjct_lb;
+    msp_tmp->sbjct.frag.rb = msp_params[i].sbjct_rb;
+    msp_tmp->sbjct.to_msp = msp_tmp;
+    msp_tmp->sbjct.ele_info = ele1;
+    msp_tmp->query.frag.lb = msp_params[i].query_lb;
+    msp_tmp->query.frag.rb = msp_params[i].query_rb;
+    msp_tmp->query.to_msp = msp_tmp;
+    msp_tmp->query.ele_info = ele2;
+
+    // Using subject images here...
+    consis_tree_build(consis_rt, &(msp_tmp->sbjct), 1);
+  }
+
+  print_consis_tree(consis_rt);
+
+  printf("consis_rt->children = %d-%d\n", consis_rt->children->to_image->frag.lb, consis_rt->children->to_image->frag.rb);
+  IMG_NODE_t *foo = consis_rt->children->sib;
+  while ( foo != NULL ) {
+    printf("sib = %d-%d\n", foo->to_image->frag.lb, foo->to_image->frag.rb);
+    foo = foo->sib;
+  }
+  print_consis_tree_GV(consis_rt,0,0);
+  //print_ascii_tree(consis_rt);
+  int token_mark = 0;
+  int max_score = 0;
+  int dir = 0;
+  int found_primary = find_prim(consis_rt->children, CUTOFF2, ele1_ele->frag.lb, -1, 0, 0, 0, 0, 0, &token_mark, &max_score, &dir);
+  printf("AFTER\n");
+  print_consis_tree_GV(consis_rt,0,0);
+}
+

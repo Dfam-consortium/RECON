@@ -10,6 +10,8 @@
 
 /* BASIC structures */
 
+// RMH: Should this really be int32_t?????
+//       TODO: In the very least this should be uint32_t
 typedef struct frag {
   char *seq_name;
   int32_t lb, rb;
@@ -38,16 +40,15 @@ typedef struct img_tree {
   struct img_tree *p, *l, *r;
 } IMG_TREE_t;
 
-/*typedef struct img_rec {
-  int msp_index;
-  struct img_rec *next;
-} IMG_REC_t; */
-
 typedef struct msp {
   /*struct msp_list *hanger;*/
-  char stat; // 'p' = highest scoring MSP for a given element pair it must be full length
-             //       for at least one of the elements.
-             // 's'
+  char stat; // 'p' = An MSP that contributes to a primary 'p' edge between two elements.
+             //       It may be in the form of single high-scoring full-length (one or
+             //       the other image) MSP or in the form of one (or more) set(s) of
+             //       consistent alignment fragments that can be viewed as a full(ish)
+             //       length image (one or both).
+             // 's'   A secondary MSP that contains fragmentary images to a pair of
+             //       elements.
   int32_t score;
   float iden;
   int direction;
@@ -135,16 +136,16 @@ int scan_msp(MSP_t *m, char *line) {
       m->sbjct.frag.lst = 'n';
       m->sbjct.frag.rst = 'n'; */
       if (m->query.frag.lb > m->query.frag.rb) {
-	m->direction *= -1;
-	bd_tmp = m->query.frag.lb;
-	m->query.frag.lb = m->query.frag.rb;
-	m->query.frag.rb = bd_tmp;
+        m->direction *= -1;
+        bd_tmp = m->query.frag.lb;
+        m->query.frag.lb = m->query.frag.rb;
+        m->query.frag.rb = bd_tmp;
       }
       if (m->sbjct.frag.lb > m->sbjct.frag.rb) {
-	m->direction *= -1;
-	bd_tmp = m->sbjct.frag.lb;
-	m->sbjct.frag.lb = m->sbjct.frag.rb;
-	m->sbjct.frag.rb = bd_tmp;
+        m->direction *= -1;
+        bd_tmp = m->sbjct.frag.lb;
+        m->sbjct.frag.lb = m->sbjct.frag.rb;
+        m->sbjct.frag.rb = bd_tmp;
       }
       return 0;
     }
@@ -228,5 +229,6 @@ int doub_cov(FRAG_t *f1, FRAG_t *f2, float cutoff) {
   }
   return 0;
 }
+
 
 #endif

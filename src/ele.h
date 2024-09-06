@@ -1,8 +1,11 @@
+#include <string.h>
 #include "msps.h"
+
 
 #define SIZE_LIMIT 500
 #define TANDEM 5
 
+// Structure to hold common endpoints of MSPs
 typedef struct cp_list {
   int32_t cp;
   struct ele_info *contributor;
@@ -145,6 +148,11 @@ void print_edge_tree(EDGE_TREE_t *rt, int level);
 void print_local_network(ELE_DATA_t *rt);
 void print_edge_tree_GML(EDGE_TREE_t *rt, int rel_to_ele_id);
 void print_all_eles_GML();
+void print_edge_tree_GV(EDGE_TREE_t *rt, int rel_to_ele_id);
+void print_all_eles_GV();
+void printImage( IMAGE_t *img );
+void print_cp_list( CP_t *cpList );
+void print_bd_list( BD_t *bdList );
 
 /*MSP_DATA_t *all_msps=NULL;
   EDGE_t *efav=NULL;*/
@@ -162,6 +170,17 @@ FILE *err, *new_msps, *eles, *unproc, *combo, *obs, *fams, *log_file;
 /***************
  * DEBUG       *
  ***************/
+
+void printImage( IMAGE_t *img ) {
+  //printf("IMAGE: index=%d, frag.seq_name = %s, frag.lb = %d, frag.rb = %d,"
+  //       "msp->to_msp->score = %d, msp->to_msp->iden = %f, ele_info->index = %d\n",
+  //        img->index, img->frag.seq_name, img->frag.lb, img->frag.rb,
+  //        img->to_msp->score, img->to_msp->iden, img->ele_info->index);
+
+  //printf("IMAGE: index=%d\n", img->index);
+  printf("IMAGE: index=%d, frag.lb = %d, frag.rb = %d\n",
+         img->index, img->frag.lb, img->frag.rb);
+}
 
 void print_ele_data(ELE_DATA_t *rt) {
   if (!rt) return;
@@ -231,6 +250,67 @@ void print_edge(EDGE_t *rt) {
   printf("\n");
 }
 
+
+//
+//  Given an edge tree do a dfs and print out edges in GraphViz
+//  (GV) format
+//
+//  If rel_to_ele_id is < 1 then print all edges defined in the
+//  the edge tree.  Otherwise only print the edges in which the
+//  lowest element index is the same as rel_to_ele_id.  This is
+//  used by other functions to print out a non-redundant set
+//  of edges.  Although this doesn't work if there are duplicates
+//  in the set.  I have seen a single node in which the following
+//  two edges were in the tree: 6 -> 8, and 8 -> 6.
+//
+// graphviz format:
+//
+// for dot the weight has to be > 0 and an integer.
+// digraph eleredef_1 {
+//        e# -- e# [weight=2,color=blue,style=dotted,label="p"];
+// }
+//        dot -Tpng test.gv > foo.png
+void print_all_eles_GV() {
+  int i = 0;
+  printf("graph eleredef {\n");
+  for (i=0; i<ele_ct && i<ele_array_size; i++) {
+    //TODO: Consider in what circumstances an entry in all_ele[] would have a NULL ele
+    if ( (*(all_ele+i))->ele )
+      print_edge_tree_GV((*(all_ele+i))->ele->edges, (*(all_ele+i))->ele->index);
+    else
+      printf("WARNING: all_ele[%d] has a NULL ele\n", i);
+  }
+  printf("}\n");
+}
+
+void print_edge_tree_GV(EDGE_TREE_t *rt, int rel_to_ele_id){
+  if (!rt) return;
+  if ( rel_to_ele_id < 1 ||
+       ((rt->to_edge->ele1_info->index < rt->to_edge->ele2_info->index &&
+        rt->to_edge->ele1_info->index == rel_to_ele_id ) ||
+       (rt->to_edge->ele2_info->index < rt->to_edge->ele1_info->index &&
+        rt->to_edge->ele2_info->index == rel_to_ele_id )) ) {
+    if ( rt->to_edge->type == 'p' )
+      printf("    e%d -- e%d [weight=%d];\n",
+             rt->to_edge->ele1_info->index,
+             rt->to_edge->ele2_info->index,
+             rt->to_edge->score + 1 );
+    else
+      printf("    e%d -- e%d [weight=%d,style=dotted];\n",
+             rt->to_edge->ele1_info->index,
+             rt->to_edge->ele2_info->index,
+             rt->to_edge->score + 1 );
+    //printf("       label \"index=%d, type=%c, direction=%d, score=%d\"\n", rt->to_edge->index, rt->to_edge->type,
+    //     rt->to_edge->direction, rt->to_edge->score );
+  }
+  if (rt->l)
+    print_edge_tree_GV(rt->l, rel_to_ele_id);
+  if (rt->r)
+    print_edge_tree_GV(rt->r, rel_to_ele_id);
+}
+
+
+
 //
 //  Given an edge tree do a dfs and print out edges in GML format
 //
@@ -265,6 +345,19 @@ void print_edge_tree_GML(EDGE_TREE_t *rt, int rel_to_ele_id){
     print_edge_tree_GML(rt->r, rel_to_ele_id);
 }
 
+void print_edge_tree_TEXT(EDGE_TREE_t *rt, int depth, char *prefix){
+  if (!rt) return;
+  int i;
+  for ( i = 0; i < depth; i++ )
+    printf("  ");
+  printf("%s edge %d: ele%d to ele%d type=%c dir=%d score=%d\n",
+         prefix, rt->to_edge->index, rt->to_edge->ele1_info->index, rt->to_edge->ele2_info->index,
+         rt->to_edge->type, rt->to_edge->direction, rt->to_edge->score );
+  if (rt->l)
+    print_edge_tree_TEXT(rt->l, depth+1, "left");
+  if (rt->r)
+    print_edge_tree_TEXT(rt->r, depth+1, "right");
+}
 
 //
 // Here because the all_eles array and ele_array_size
@@ -285,6 +378,25 @@ void print_all_eles_GML() {
   printf("]\n");
 }
 
+void print_cp_list( CP_t *cpList ) {
+  if ( !cpList ) return;
+  CP_t *curr;
+  curr=cpList;
+  while ( curr ) {
+    printf("CP_t: cp=%d, ele_info->index=%d\n", curr->cp, curr->contributor->index);
+    curr = curr->next;
+  }
+}
+
+void print_bd_list( BD_t *bdList ) {
+  if ( !bdList ) return;
+  BD_t *curr;
+  curr=bdList;
+  while ( curr ) {
+    printf("BD_t: bd=%d, support=%d\n", curr->bd, curr->support);
+    curr = curr->next;
+  }
+}
 
 void print_local_network(ELE_DATA_t *rt) {
   if (!rt) return;
@@ -567,7 +679,7 @@ ELEMENT_t *ele_read_in(ELE_INFO_t *ele_info, int stage) {
       }
       continue;
     }
-    if (!strncmp(head, img_no, 10)) {
+    if (!strncmp(head, img_no, (long unsigned int)10)) {
       sscanf(line, "%*s %d\n", &ele_info->ele->img_no);
       if (stage != 3 && ele_info->ele->img_no) img_array = (IMAGE_t **) malloc(ele_info->ele->img_no*sizeof(IMAGE_t *));
       continue;
@@ -1052,8 +1164,36 @@ IMG_TREE_t *find_image(IMG_TREE_t *rt, int index) {
 }
 
 
-
-
+//
+// An IMG_TREE_t is a simply binary tree structure.  It
+// has left(l), right(r), and parent(p) pointers as well
+// as a pointer to a IMAGE_t(image).  This routine appears
+// to perform a DFS of the tree and return all nodes as
+// a linked list.
+//
+// E.g Given the image tree:
+//
+//                        tree_1
+//                          p = NULL
+//                          image = img_1
+//                          l           r
+//                         /             \
+//                        /               \
+//                       /                 \
+//                tree_2                    tree_3
+//                   p = tree_1                p = tree_1
+//                   image = img_2             image = img_3
+//                   l,r = NULL                l,r = NULL
+//
+// Return the linked list:
+//
+//   idata_1
+//     to_image = img_2
+//     next --------------> idata_2
+//                             to_image = img_1
+//                             next --------------> idata_3
+//                                                    to_image = img_3
+//                                                    next = NULL
 IMG_DATA_t **listify(IMG_TREE_t *rt, IMG_DATA_t **tail_ptr) {
   IMG_DATA_t *new, **new_tail_ptr;
 
@@ -1129,6 +1269,7 @@ int count_total_edges(EDGE_TREE_t *rt) {
 
 
 
+// Insert into existing or into freshly created binary tree by edge->index value.
 void insert_edge(EDGE_TREE_t **rt_ptr, EDGE_t *ed) {
   EDGE_TREE_t *new, *x, *y;
 

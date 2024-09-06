@@ -37,7 +37,9 @@ while ( <IN> )
   #       1      1  1       gi|1     1519     1709
   #       1  11727  1     gi|596    29279    29564
   #       3  11454 -1     gi|588     7468     7549
-  if ( /^\s*($family_ID\s+.*)/ )
+  if ( $family_ID < 1 && /^\s*(\d+\s+.*)/ ) { 
+    $elements{ $flds[1] } = {};
+  }elsif ( /^\s*($family_ID\s+.*)/ )
   {
     $elements{ $flds[ 1 ] } = {};
   }

@@ -37,7 +37,7 @@ struct asciinode_struct
   int parent_dir;
 
   //max supported unit32 in dec, 10 digits max
-  char label[20];
+  char label[40];
 };
 
 
@@ -247,7 +247,14 @@ void compute_edge_lengths(int gap, int *lprofile, int *rprofile, asciinode *node
         node->right->parent_dir = 1;
       }
 
-      sprintf(node->label, "%d", t->to_image->frag.lb);
+      if ( t->to_image->to_msp ) {
+        if ( t->to_image->to_msp->direction == 1 )
+          sprintf(node->label, "%d-%d[+]", t->to_image->frag.lb, t->to_image->frag.rb);
+        else
+          sprintf(node->label, "%d-%d[-]", t->to_image->frag.lb, t->to_image->frag.rb);
+      }else {
+        sprintf(node->label, "root");
+      }
       node->lablen = strlen(node->label);
 
       return node;

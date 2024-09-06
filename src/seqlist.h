@@ -10,6 +10,8 @@ int GetSeqIndex(int, int, char *);
 
 
 
+// WARNING: Global variables
+//   This reads the seqnames file into a global variable "seq_names".
 void GetSeqNames(FILE *seq_list) {
   char line[256];
   int seq_ct = -1;
@@ -37,7 +39,7 @@ void GetSeqNames(FILE *seq_list) {
       if (line[0] == '>') {
 	name_start++;
 	while (isspace(*name_start)) name_start++;
-      } 
+      }
       strncpy(*(seq_names+seq_ct), name_start, NAME_LEN-1);
       /* mark the end of the string */
 	 name_start = *(seq_names+seq_ct);
