@@ -1,5 +1,13 @@
 RECON -- finding repeat families from biological sequences
-Version 1.08 (Jan 2014)
+
+###  This repository contains a development version of 
+###  of RECON.  The last official release was initially 
+###  checked in with minor documentation changes as 
+###  Commit def1f6f.  Currrently the master branch contains
+###  code modifications that are in-flux.  When the 3.0.9
+###  release is ready we will begin to keep the master 
+###  branch synced with official releases.
+
 Copyright (C) 2001 Washington University School of Medicine
 Copyright (C) 2011-2021 Institute for Systems Biology
 ------------------------------------------------------------------
