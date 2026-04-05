@@ -1,5 +1,6 @@
-# Makefile for ReCon
+# Makefile for RECON
 #
+# Build targets:  all, install, clean, test
 #
 VERSION = 1.09
 
@@ -7,81 +8,68 @@ VERSION = 1.09
 BINDIR  = ../bin
 MANDIR  = $(HOME)/man
 
-## sourcefiles
-#SRCDIR = .
-
 ## your compiler
-#CC = cc    # for SGI Origin200 compiler#
 CC = gcc
 
-## any special compiler flags you want
-#  -pedantic clashes with -DMEMDEBUG??
-#
-#CFLAGS = -g -Wall -pedantic
-CFLAGS = -O -I ../minunit
-#CFLAGS = -g
-#CFLAGS = -TARG:exc_max -64 -Ofast=ip27   #specific SGI Origin200  compiler#
-
-## machine specific definitions
-#  None should be needed
-#
-# Development:
-# -DASSERT        Diagnostics level 1. Assertions. 
-# -DVERBOSE       Diagnostics level 2. Verbosity.  (unused at the moment)
-# -DMEMDEBUG      Diagnostics level 3. Memory checking. (maybe slow!)
-#                                      (must link w/ -ldbmalloc) 
-# -DLINTING       Suppress overzealous warnings from gcc -Wall and lint   
-#
+## Compiler flags
+## -DASSERT        Diagnostics level 1. Assertions.
+## -DVERBOSE       Diagnostics level 2. Verbosity.  (unused at the moment)
+## -DMEMDEBUG      Diagnostics level 3. Memory checking. (maybe slow!)
+##                                      (must link w/ -ldbmalloc)
+## -DLINTING       Suppress overzealous warnings from gcc -Wall and lint
 #MDEFS = -DLINTING -DASSERT -DMEMDEBUG
-#MDEFS = -DASSERT 
- 
-## how to install the man pages 
-## cp is fine
-INSTMAN   = cp
-MANSUFFIX = 1
+#MDEFS = -DASSERT
 
-## Your compression program
-COMPRESS = gzip               # GNU compression (better, smaller)
-#COMPRESS = compress          # generic UNIX compress (portable)
+## Tunable constants -- override on the command line to change pipeline behaviour
+## without editing source.  All values here are the original defaults.
+## Example:  make TUNABLES="-DELEREDEF_MAX_IMAGES=2400 -DBFS_CLAN_DEPTH=4"
+##
+## Constants and their recon_defs.h names (original name in parentheses):
+##   SEQ_NAME_MAX_LEN      -- max sequence-name length      (NAME_LEN=50)
+##   BFS_CLAN_DEPTH        -- BFS depth for local networks  (DEPTH=3)
+##   TANDEM_SIZE_LIMIT     -- tandem-filter image threshold  (SIZE_LIMIT=500)
+##   TANDEM_IMG_RATIO      -- tandem-filter ratio threshold  (TANDEM=5)
+##   ELEDEF_IMGPROT_CAP    -- eledef image batch capacity    (IMG_CAP=500000)
+##   ELEREDEF_MAX_IMAGES   -- eleredef image array capacity  (MAX_IMG=1200)
+##   MIN_ELEMENT_LEN_BP    -- minimum element length in bp   (TOO_SHORT=30)
+##   ELEREDEF_CUTOFF_SINGLE -- eleredef single-cov cutoff   (CUTOFF1=0.5)
+##   ELEREDEF_CUTOFF_DOUBLE -- eleredef double-cov cutoff   (CUTOFF2=0.9)
+##   EDGEREDEF_EDGE_CUTOFF  -- edge PPS filter ratio        (CUTOFF3=0.7)
+##
+## Equivalence / regression testing flag:
+##   ORIGINAL_BUGS         -- restore two pre-existing bugs for output
+##                            comparison against the released binaries.
+##                            See recon_defs.h for details.
+##                            Example:  make TUNABLES="-DORIGINAL_BUGS"
+TUNABLES =
+
+CFLAGS = -O -I ../minunit $(TUNABLES)
+
+## your compression program for dist target
+COMPRESS = gzip
 
 #######
 ## should not need to modify below this line
 #######
-SHELL  = /bin/sh
-LIBS   = -lsquid -lm
-#LIBS = -ldbmalloc -lsquid -lm 
-
-READMES = README 
-#INSTALL COPYING DEMO GNULICENSE FILES
+SHELL = /bin/sh
+LIBS  = -lm
 
 PROGS = imagespread eledef eleredef edgeredef famdef
 
-MANSRC= 
+HDRS = bolts.h seqlist.h msps.h ele.h treeview.h eleredef.h \
+       recon_defs.h recon_log.h
 
-DOCS =  
+SRC = imagespread.c eledef.c eleredef.c edgeredef.c famdef.c
 
-HDRS =  bolts.h seqlist.h msps.h ele.h treeview.h
+DISTFILES = $(SRC) $(HDRS) Makefile
 
-MAIN =  
-
-SRC =   imagespread.c eledef.c eleredef.c edgeredef.c famdef.c 
-
-OBJ =   
-
-DISTFILES = $(MAIN) $(SRC) $(HDRS) $(MANSRC) $(READMES) $(DOCS)
-
-TESTSUITE = 
-
-DEMOS = $(HOME)/Demos
-
-all: 	$(PROGS)
-
+all: $(PROGS)
 
 install: $(PROGS)
 	cp $(PROGS) $(BINDIR)/
 
 clean:
-	-rm -f imagespread eledef eleredef edgeredef famdef *.o *~ *.Addrs *.Counts *.pixie Makefile.bak core $(PROGS) TAGS
+	-rm -f $(PROGS) *.o *~ *.Addrs *.Counts *.pixie Makefile.bak core TAGS
 
 tags:
 	etags -t $(DISTFILES)
@@ -89,25 +77,30 @@ tags:
 dist:
 	@if test -d recon-$(VERSION);        then rm -rf recon-$(VERSION);    fi
 	@if test -f recon-$(VERSION).tar.gz; then rm recon-$(VERSION).tar.gz; fi
-	@if test -f recon-$(VERSION).tar.Z;  then rm recon-$(VERSION).tar.Z;  fi
 	mkdir recon-$(VERSION)/
 	cp $(DISTFILES) recon-$(VERSION)/
-	cp Makefile.dist recon-$(VERSION)/Makefile
-	mkdir recon-$(VERSION)/Testsuite
-	for testfile in $(TESTSUITE); do \
-	  cp Testsuite/$$testfile recon-$(VERSION)/Testsuite/;\
-	done
-	mkdir recon-$(VERSION)/Demos
-	for demofile in $(DEMOS); do\
-	  cp Demos/$$demofile recon-$(VERSION)/Demos/;\
-	done
 	tar cvf recon-$(VERSION).tar recon-$(VERSION)
 	$(COMPRESS) recon-$(VERSION).tar
 
-test:   
+test:
 	(cd Testsuite; testsuite.sh)
 
-.c.o:
-	$(CC) $(CFLAGS) $(MDEFS) -c $< -o $*.o		
 
+## Explicit build rules with full header dependencies.
+## All programs are single translation units; each .c includes its headers
+## directly, so the full HDRS list is listed as a dependency for each.
 
+imagespread: imagespread.c $(HDRS)
+	$(CC) $(CFLAGS) $(MDEFS) -o imagespread imagespread.c $(LIBS)
+
+eledef: eledef.c $(HDRS)
+	$(CC) $(CFLAGS) $(MDEFS) -o eledef eledef.c $(LIBS)
+
+eleredef: eleredef.c $(HDRS)
+	$(CC) $(CFLAGS) $(MDEFS) -o eleredef eleredef.c $(LIBS)
+
+edgeredef: edgeredef.c $(HDRS)
+	$(CC) $(CFLAGS) $(MDEFS) -o edgeredef edgeredef.c $(LIBS)
+
+famdef: famdef.c $(HDRS)
+	$(CC) $(CFLAGS) $(MDEFS) -o famdef famdef.c $(LIBS)

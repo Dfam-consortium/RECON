@@ -1,7 +1,52 @@
+/*
+ * famdef.c  --  Stage 5: repeat family definition by BFS on the element graph
+ *
+ * Algorithm overview
+ * ------------------
+ * This is the final stage of the RECON pipeline.  It reads the edge-filtered
+ * elements from tmp/ and groups connected elements into "repeat families" by
+ * performing a breadth-first search over the element similarity graph.
+ *
+ * Two elements are placed in the same family if they are connected by one or
+ * more primary ('p' or 'P') edges.  Each connected component in the graph
+ * becomes one repeat family.
+ *
+ * Direction tracking:
+ *   The BFS also tracks the relative orientation of each element with respect
+ *   to the seed.  The Dirs_t list records the cumulative direction product
+ *   along each path from the seed.  This allows RECON to report whether each
+ *   element copy is on the same or opposite strand as the family prototype.
+ *
+ * Output files (all in summary/):
+ *   eles      -- one line per element: family_idx ele_idx dir seq start end
+ *   families  -- one line per family:  family_idx copy_count "unknown"
+ *   fam_no    -- total number of families
+ *   ele_no    -- total number of elements in families
+ *
+ * Usage
+ *   famdef seq_list [-l log_level]
+ *
+ *   -l <level>  log verbosity: 0=silent 1=error 2=warn 3=info 4=debug
+ *               (default: 3=info)
+ *
+ * Author: Zhirong Bao
+ * Modifications: Robert Hubley, Institute for Systems Biology
+ */
+
 #include "ele.h"
 #include "seqlist.h"
 
+/* ---- Per-program log level storage (required by recon_log.h) ---- */
+int   recon_log_level = RECON_LOG_INFO;
+FILE *recon_log_fp    = NULL;
 
+
+/*
+ * Dirs_t  --  direction tracking node for the BFS family-building pass
+ *
+ * dir  cumulative orientation product along the path from the BFS seed
+ *      to this element: +1 = same strand, -1 = opposite strand.
+ */
 typedef struct Dirs {
   int dir;
   struct Dirs *next;
@@ -26,9 +71,18 @@ int main (int argc, char *argv[]) {
   FILE  *fam_no, *final_ele_no;
   int tot_ele;
 
-  /* processing command line */
+  /* Strip optional "-l <level>" before positional arg parsing */
+  if (recon_parse_log_flag(&argc, argv)) {
+    fprintf(stderr, "error: -l requires a numeric log level argument\n");
+    exit(1);
+  }
+
+  /* Validate command line */
   if (argc == 1) {
-    printf("usage: famdef seq_list\n where seq_list is the list of sequence names.\n");
+    printf("usage: famdef seq_list [-l level]\n"
+           "  seq_list  list of sequence names\n"
+           "  -l <level>  log verbosity: 0=silent 1=error 2=warn "
+           "3=info(default) 4=debug\n");
     exit(1);
   }
 
@@ -57,6 +111,7 @@ int main (int argc, char *argv[]) {
   final_ele_no = fopen("summary/ele_no", "w");
 
   log_file = fopen("tmp/log2", "w");
+  recon_log_fp = log_file;
 
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);

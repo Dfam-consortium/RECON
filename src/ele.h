@@ -1,79 +1,222 @@
+/*
+ * ele.h  --  Element, edge, and family data structures for the RECON pipeline
+ *
+ * This header is the primary shared library for stages 3-5 of the RECON
+ * pipeline (eleredef, edgeredef, famdef).  It defines all data types used
+ * to represent:
+ *   - Elements: genomic intervals that result from clustering MSP images
+ *   - Edges: similarity relationships between elements
+ *   - Families: clusters of related elements
+ *
+ * It also provides all functions for initializing, reading, writing,
+ * searching, and freeing these structures, along with a set of toString-
+ * style print helpers for debugging.
+ *
+ * Element file format (tmp/e<N> and tmp2/e<N>)
+ * --------------------------------------------
+ * Each element is serialized to a text file with keyword-prefixed lines:
+ *
+ *   frag    <seq_name> <lb> <rb>
+ *   direc   <direction>
+ *   update  <update_flag>
+ *   img_no  <image_count>
+ *   flimg_no <full_len_image_count>
+ *   edge_no <edge_count>
+ *   msp     <img_id> <stat> <score> <iden> <dir> <ele1> <qseq> <qlb> <qrb> \
+ *             <ele2> <sseq> <slb> <srb>
+ *   edge    <idx> <type> <dir> <score> <ele1_idx> <ele2_idx>
+ *   pcp     <position> <contributor_ele_idx>
+ *   tbd     <position> <support>
+ *   redef   <child_ele_idx>
+ *
+ * The file for element N is read from tmp/e<N> (original) or tmp2/e<N>
+ * (updated); the ele_info->file_updated flag selects which path to use.
+ *
+ * Author: Zhirong Bao
+ * Modifications: Robert Hubley, Institute for Systems Biology
+ */
+
 #include "msps.h"
+#include "recon_log.h"
 
-#define SIZE_LIMIT 500
-#define TANDEM 5
+/*
+ * TANDEM_SIZE_LIMIT and TANDEM_IMG_RATIO are defined in recon_defs.h
+ * (pulled in transitively via msps.h -> bolts.h -> recon_defs.h).
+ * The backward-compat aliases SIZE_LIMIT and TANDEM are also defined there.
+ */
 
+
+/* ============================================================
+ * Data structures
+ * ============================================================ */
+
+/*
+ * CP_t  --  Potential Cut Point
+ *
+ * A linked-list node representing a candidate element-boundary position.
+ * CPs are accumulated in ELEMENT_t.PCP during edges_and_cps() from the
+ * endpoints of full-length images.  They are later clustered into "to-be-
+ * determined" boundaries (BD_t / TBD) by PCP_to_TBDs().
+ *
+ * cp           genomic coordinate of the candidate cut point.
+ * contributor  the element whose image endpoint produced this CP.
+ */
 typedef struct cp_list {
-  int32_t cp;
+  int32_t          cp;
   struct ele_info *contributor;
-  struct cp_list *next;
+  struct cp_list  *next;
 } CP_t;
 
+/*
+ * BD_t  --  To-Be-Determined boundary (clustered cut point)
+ *
+ * A linked-list node representing a well-supported element boundary
+ * candidate produced by clustering the CP_t list in CP_cluster().
+ *
+ * bd       consensus genomic coordinate of the cluster (weighted mean).
+ * support  number of CPs in the cluster that contributed to this boundary.
+ */
 typedef struct bd_list {
-  int32_t bd;
-  int support;
+  int32_t       bd;
+  int           support;
   struct bd_list *next;
 } BD_t;
 
+/*
+ * EDGE_t  --  a similarity relationship between two elements
+ *
+ * Edges are created during edges_and_cps() when two elements share
+ * full-length (or near-full-length) MSP images.  They are used by
+ * edgeredef to filter spurious relationships and by famdef to build
+ * repeat families via BFS on the edge graph.
+ *
+ * index       unique sequential edge identifier.
+ * type        classification of the edge:
+ *               'p' = primary (unfiltered, used for family building)
+ *               'P' = promoted primary (winner after PPS filtering)
+ *               'S' = demoted secondary (loser after PPS filtering)
+ *               's' = secondary (initially weaker primary candidate)
+ *               'c' = cycle/self edge (invalid, filtered out)
+ * direction   relative orientation of the two elements:
+ *               +1 = same strand, -1 = opposite strands.
+ * score       MSP alignment score; used by edge_filt() to choose the
+ *             highest-scoring PPS edge when demoting.
+ * ele1_info   one endpoint of the edge (lower index by convention).
+ * ele2_info   the other endpoint of the edge.
+ */
 typedef struct edge {
-  int index;
-  char type; /* 'p', 's', 'c' */
-  int direction; /* for clustering elements in consistent directions */
-  int32_t score; /* for edge_filt, to solve the PPS problem */
+  int             index;
+  char            type;
+  int             direction;
+  int32_t         score;
   struct ele_info *ele1_info, *ele2_info;
 } EDGE_t;
 
-/* typedef struct edge_list {
-  EDGE_t *to_edge;
-  struct edge_list *next;
-} EDGE_DATA_t; */
-
+/* Binary-search-tree node wrapping an EDGE_t pointer.
+ * Keyed on EDGE_t.index for O(log n) lookup in find_edge(). */
 typedef struct edge_tree {
-  EDGE_t *to_edge;
-  struct edge_tree *p, *l, *r;
+  EDGE_t           *to_edge;
+  struct edge_tree *p, *l, *r;   /* parent, left child, right child */
 } EDGE_TREE_t;
 
+/*
+ * ELEMENT_t  --  a repeat element: a genomic interval with its images and edges
+ *
+ * index        sequential identifier (1-based); matches file name "e<index>".
+ * frag         the representative genomic interval for this element.
+ * direction    orientation of the element (+1 forward, -1 reverse).
+ * update       non-zero if this element's coordinates were modified during
+ *              redefinition and need to be re-evaluated by its partners.
+ * l_hold       depth counter used during BFS local-network construction in
+ *              build_local_network().  0 = not yet in any network;
+ *              1..DEPTH = in network at this BFS depth.
+ *              (was: l_hold -- "local hold")
+ * img_no       current count of images assigned to this element.
+ * flimg_no     count of "full-length" images (images that span >= CUTOFF2
+ *              of the element's representative fragment).
+ * edge_no      count of edges in the edge tree.
+ * to_img_tree  balanced BST of IMAGE_t pointers, keyed on image index.
+ * to_img_data  singly-linked list of IMG_DATA_t; populated lazily by
+ *              listify() when a sorted traversal is needed.
+ * edges        balanced BST of EDGE_t pointers, keyed on edge index.
+ * PCP          linked list of Potential Cut Points.
+ * TBD          linked list of To-Be-Determined boundaries (post-clustering).
+ * redef        linked list of ELE_DATA_t pointing to child elements
+ *              created when this element is dissected.
+ */
 typedef struct element {
-  int index;
-  FRAG_t frag;
-  int direction; 
-  short update, l_hold;
-  int img_no; // number of images mapping to element
-  int flimg_no; // number of images that are full length
-  int edge_no; // number of edges.....
-  IMG_TREE_t *to_img_tree;
-  IMG_DATA_t *to_img_data;
-  EDGE_TREE_t *edges;
-  CP_t *PCP;
-  BD_t *TBD;
+  int             index;
+  FRAG_t          frag;
+  int             direction;
+  short           update, l_hold;
+  int             img_no;
+  int             flimg_no;
+  int             edge_no;
+  IMG_TREE_t     *to_img_tree;
+  IMG_DATA_t     *to_img_data;
+  EDGE_TREE_t    *edges;
+  CP_t           *PCP;
+  BD_t           *TBD;
   struct ele_list *redef;
-/*  IMG_REC_t *ignored, *dissected; */
 } ELEMENT_t;
 
+/*
+ * ELE_INFO_t  --  lightweight metadata wrapper for an element
+ *
+ * This structure acts as a persistent handle for an element across the
+ * pipeline stages.  The heavy ELEMENT_t is only loaded into memory when
+ * needed (ele_read_in) and freed when no longer needed (ele_cleanup).
+ *
+ * index        element identifier; matches the e<N> file name.
+ * ele          pointer to the in-memory ELEMENT_t; NULL when not loaded.
+ * stat         current processing state:
+ *                'z' = initial state (not yet processed)
+ *                't' = edges and CPs computed (after edges_and_cps())
+ *                'v' = locally redefined; no further split needed
+ *                'w' = combined (redefinition complete, no duplicates)
+ *                'y' = edge-filtered; ready for family building
+ *                'x' = recruited into a family (famdef)
+ *                'O' = large tandem repeat; removed from processing
+ *                'X' = dismissed / deleted element
+ * file_updated flag: 0 => read from tmp/e<N>; 1 => read from tmp2/e<N>.
+ * to_family    pointer to the FAMILY_t this element belongs to (set in famdef).
+ * next         intrusive-list link for the ele_info_data overflow chain.
+ */
 typedef struct ele_info {
-  int index;
-  ELEMENT_t *ele;
-  char stat; /* 'z', 't', 'v', 'w', 'y', 'x' and 'X' */
-  short file_updated;
-  struct family *to_family;
+  int              index;
+  ELEMENT_t       *ele;
+  char             stat;
+  short            file_updated;
+  struct family   *to_family;
   struct ele_info *next;
 } ELE_INFO_t;
 
+/* Singly-linked list node wrapping an ELE_INFO_t pointer. */
 typedef struct ele_list {
   struct ele_info *ele_info;
   struct ele_list *next;
 } ELE_DATA_t;
 
 
+/*
+ * FAMILY_t  --  a repeat family: a connected component in the element
+ * similarity graph.
+ *
+ * index     sequential family identifier (1-based).
+ * name      reserved; currently always written as "unknown" in the output.
+ * members   linked list of ELE_DATA_t of all elements in this family.
+ * relatives reserved; not used in the current pipeline.
+ */
 typedef struct family {
-  int index;
-  char name[10];
+  int         index;
+  char        name[10];
   ELE_DATA_t *members;
   struct fam_list *relatives;
 } FAMILY_t;
 
+/* Singly-linked list node wrapping a FAMILY_t pointer. */
 typedef struct fam_list {
-  struct family *to_family;
+  struct family   *to_family;
   struct fam_list *next;
 } FAM_DATA_t;
 
@@ -137,6 +280,7 @@ void fam_cleanup(FAMILY_t **);
 void frag_data_free(FRAG_DATA_t **);
 void frag_data_cleanup(FRAG_DATA_t **);
 
+/* Existing toString-style print helpers */
 void print_ele(ELEMENT_t *rt);
 void print_ele_info(ELE_INFO_t *rt);
 void print_ele_data(ELE_DATA_t *rt);
@@ -146,17 +290,79 @@ void print_local_network(ELE_DATA_t *rt);
 void print_edge_tree_GML(EDGE_TREE_t *rt, int rel_to_ele_id);
 void print_all_eles_GML();
 
-/*MSP_DATA_t *all_msps=NULL;
-  EDGE_t *efav=NULL;*/
+/* New toString-style print helpers (definitions at end of this file) */
+void print_cp(CP_t *cp);
+void print_cp_list(CP_t *cp);
+void print_bd(BD_t *bd);
+void print_bd_list(BD_t *bd);
+void print_family(FAMILY_t *fam);
+void print_fam_data(FAM_DATA_t *fd);
+
+/* ============================================================
+ * Per-program logging state
+ *
+ * Each .c that includes ele.h must define storage for these two
+ * variables.  See recon_log.h for the RLOG_* macros that use them.
+ *
+ * Example (at file scope in each .c):
+ *   int   recon_log_level = RECON_LOG_INFO;
+ *   FILE *recon_log_fp    = NULL;
+ * ============================================================ */
+extern int   recon_log_level;
+extern FILE *recon_log_fp;
+
+
+/* ============================================================
+ * Pipeline-wide global state
+ *
+ * These globals are shared across all functions in ele.h and the
+ * three .c files that include it (eleredef, edgeredef, famdef).
+ * They are defined by whichever .c includes this header.
+ * ============================================================ */
+
+/* all_ele        -- pre-allocated array of ELE_INFO_t pointers, indexed
+ *                   0..ele_array_size-1.  New elements are added here until
+ *                   the array is full, then via the ele_info_data overflow list. */
 ELE_INFO_t **all_ele;
+
+/* ele_ct         -- running count of elements seen so far in this stage.
+ * ele_array_size -- initial allocation size of all_ele[]. */
 int ele_ct, ele_array_size, fam_ct;
+
+/* clan_size      -- total elements in the current BFS local network.
+ * clan_core_size -- elements within DEPTH hops of the BFS seed. */
 int clan_size, clan_core_size;
-int32_t msp_in_mem, msp_left, msp_ct, msp_index;
+
+/* MSP memory-tracking counters (used by MSP_malloc / MSP_free) */
+int32_t msp_in_mem;   /* currently allocated MSPs */
+int32_t msp_left;     /* MSPs remaining after a dissolve (should be 0) */
+int32_t msp_ct;       /* total MSPs allocated in this run */
+int32_t msp_index;    /* highest MSP sequential index seen */
+
+/* Edge memory-tracking counters (used by EDGE_malloc / EDGE_free) */
 int32_t edge_index, edge_in_mem, edge_left, edge_ct;
-int32_t  files_read, clan_ct, err_no;
+
+/* Miscellaneous run-time counters */
+int32_t files_read;   /* number of element files read from disk */
+int32_t clan_ct;      /* number of BFS local networks processed */
+int32_t err_no;       /* accumulated error count; non-zero triggers exit */
+
+/* ele_info_data  -- head of the overflow linked list used when ele_ct
+ *                   exceeds ele_array_size.
+ * ele_info_tail  -- tail pointer for O(1) append to the overflow list. */
 ELE_INFO_t *ele_info_data, *ele_info_tail;
+
 FAM_DATA_t *FAMs;
-FILE *err, *new_msps, *eles, *unproc, *combo, *obs, *fams, *log_file;
+
+/* Pipeline output files -- opened by each program's main() */
+FILE *err;         /* error / diagnostic messages */
+FILE *new_msps;    /* new MSP records created during dissection */
+FILE *eles;        /* final elements output (famdef summary/eles) */
+FILE *unproc;      /* elements removed as large tandems or dismissed */
+FILE *combo;       /* combination output (combo elements) */
+FILE *obs;         /* obsolete elements */
+FILE *fams;        /* final families output (famdef summary/families) */
+FILE *log_file;    /* primary pipeline progress log */
 
 
 /***************
@@ -422,6 +628,33 @@ ELE_INFO_t *linked_ele(ELE_INFO_t *ele_info, EDGE_t *edge) {
 
 
 
+/*
+ * outthrow_big_tandems  --  filter elements that are likely tandem repeats
+ *
+ * An element is classified as a tandem repeat if:
+ *   ino  > TANDEM_SIZE_LIMIT (was: SIZE_LIMIT)  AND
+ *   ino / p_ct > TANDEM_IMG_RATIO (was: TANDEM)
+ *
+ * The logic is that tandem repeats produce many images (ino) that all map
+ * back to the same small set of nearby partner elements (p_ct), giving a
+ * very high images-per-partner ratio.  Dispersed repeats, by contrast,
+ * have many distinct partner elements across the genome.
+ *
+ * Filtered elements are marked 'O' (orphan) in all_ele and written to the
+ * unproc summary file.
+ *
+ * Parameters
+ *   size_list  FILE* positioned at the beginning of ele_def_res/size_list,
+ *              which contains one "<ei> <ino>" (element_index image_count)
+ *              line per element.
+ *
+ * Local variables
+ *   ei    element index
+ *   ino   image count for this element
+ *   p_ct  unique partner element count
+ *   i_ct  total MSP (msp line) count scanned in element file
+ *   p_id  most recently seen partner id (for deduplication after sort)
+ */
 void outthrow_big_tandems(FILE *size_list){
   int ei, ino;
   FILE *ele_file;
@@ -505,9 +738,32 @@ void spit_out_ele(ELE_INFO_t *ele_info) {
 
 
 
+/*
+ * ele_read_in  --  deserialize an element from its file on disk
+ *
+ * Reads the element file (tmp/e<N> or tmp2/e<N>) into a newly allocated
+ * ELEMENT_t and attaches it to ele_info->ele.  The file is selected by
+ * ele_info->file_updated: 0 => tmp/, 1 => tmp2/.
+ *
+ * The 'stage' parameter controls how much of the file is parsed:
+ *   stage 1  -- full load: frag, images (msp lines), edges, PCPs, TBDs
+ *   stage 2  -- skip PCPs (eleredef second pass)
+ *   stage 3  -- skip images and PCPs (edgeredef / famdef)
+ *   stage 4  -- full load without PCPs (famdef variant)
+ *
+ * Image loading builds an in-memory balanced BST (to_img_tree) keyed on
+ * image index.  Edge loading builds a parallel BST (edges) keyed on edge
+ * index.  Both are sorted before building via qsort + build_*_tree().
+ *
+ * Sequence names in msp/frag lines are interned via GetSeqIndex() so
+ * that pointer-equality tests work throughout the element processing code.
+ *
+ * The keyword variables (index, stat, frag, msp, edge, ...) are string
+ * literals used as targets for strncmp() line-dispatch.
+ */
 ELEMENT_t *ele_read_in(ELE_INFO_t *ele_info, int stage) {
-  char line[200], head[10], rest[150], *fn = (char *) malloc(20*sizeof(char));
-  char fragname[NAME_LEN];
+  char line[200], head[10], rest[150], *fn = (char *) malloc(64*sizeof(char));
+  char fragname[SEQ_NAME_MAX_LEN];
   int pos;
   FILE *fp;
   IMAGE_t **img_array;
@@ -519,11 +775,11 @@ ELEMENT_t *ele_read_in(ELE_INFO_t *ele_info, int stage) {
 
   char *index="index", *stat = "stat", *file_updated="file_updated", *family="family", *direc="direc", *update="update", *l_hold="l_hold", *img_no="img_no", *flimg_no="flimg_no", *edge_no="edge_no", *frag="frag", *pcp="pcp", *tbd="tbd", *redef="redef", *msp="msp", *edge="edge";
 
-  if (ele_info->file_updated) sprintf(fn, "tmp2/e%d", ele_info->index);
-  else sprintf(fn, "tmp/e%d", ele_info->index);
+  if (ele_info->file_updated) snprintf(fn, 64, "tmp2/e%d", ele_info->index);
+  else snprintf(fn, 64, "tmp/e%d", ele_info->index);
   fp = fopen(fn, "r");
   /*if (!fp) {
-    sprintf(fn, "tmp/e%d", ele_info->index);
+    snprintf(fn, 64, "tmp/e%d", ele_info->index);
     fp = fopen(fn, "r");
   }*/
   files_read ++;
@@ -542,8 +798,8 @@ ELEMENT_t *ele_read_in(ELE_INFO_t *ele_info, int stage) {
     if (!strncmp(head, flimg_no, 10)) {sscanf(line, "%*s %d\n", &ele_info->ele->flimg_no); continue;}
     if (!strncmp(head, frag, 10)) {
       sscanf(line, "%*s %s %d %d\n", fragname, &ele_info->ele->frag.lb, &ele_info->ele->frag.rb);
-      pos = GetSeqIndex(0, seq_no-1, fragname);
-      ele_info->ele->frag.seq_name = *(seq_names+pos);
+      pos = GetSeqIndex(0, seq_count-1, fragname);
+      ele_info->ele->frag.seq_name = seq_name_table[pos];
       if (ele_info->ele->frag.lb > ele_info->ele->frag.rb) {
 	fprintf(log_file, "error:  ele %d reversed from read_in\n", ele_info->index);
 	fflush(log_file);
@@ -603,7 +859,11 @@ ELEMENT_t *ele_read_in(ELE_INFO_t *ele_info, int stage) {
       cur_ele_data = (ELE_DATA_t *) malloc(sizeof(ELE_DATA_t));
       cur_ele_data->ele_info = get_ele_info(holder);
       cur_ele_data->next = ele_info->ele->redef;
-      ele_info->ele->redef = cur_ele_data->next;
+#ifdef ORIGINAL_BUGS
+      ele_info->ele->redef = cur_ele_data->next;  /* original: assigns old head, cur_ele_data lost */
+#else
+      ele_info->ele->redef = cur_ele_data;         /* fix: prepend cur_ele_data to redef list */
+#endif
 	  continue;
     }
   }
@@ -673,10 +933,10 @@ void img_scan(ELE_INFO_t *ele_info, char *line, IMAGE_t **img_array, int *img_en
 
   /*printf("%s", line);*/
   sscanf(line, "msp %d %c %d %f %d %d %s %d %d %d %s %d %d\n", &id, &msp_tmp->stat, &msp_tmp->score, &msp_tmp->iden, &msp_tmp->direction, &ele1, qname, &msp_tmp->query.frag.lb, &msp_tmp->query.frag.rb, &ele2, sname, &msp_tmp->sbjct.frag.lb, &msp_tmp->sbjct.frag.rb);
-  pos = GetSeqIndex(0, seq_no-1, qname);
-  msp_tmp->query.frag.seq_name = *(seq_names+pos);
-  pos = GetSeqIndex(0, seq_no-1, sname);
-  msp_tmp->sbjct.frag.seq_name = *(seq_names+pos);
+  pos = GetSeqIndex(0, seq_count-1, qname);
+  msp_tmp->query.frag.seq_name = seq_name_table[pos];
+  pos = GetSeqIndex(0, seq_count-1, sname);
+  msp_tmp->sbjct.frag.seq_name = seq_name_table[pos];
 
   if (id%2) {
     epi = get_ele_info(ele1);
@@ -1571,4 +1831,77 @@ void frag_data_cleanup(FRAG_DATA_t **fd) {
     cur = next;
   }
   *fd = NULL;
+}
+
+
+/* ============================================================
+ * Additional toString-style print helpers
+ * ============================================================ */
+
+/*
+ * print_cp  --  one-line summary of a single CP_t node.
+ */
+void print_cp(CP_t *cp) {
+  if (!cp) { printf("CP_t: NULL\n"); return; }
+  printf("CP_t: cp=%d, contributor->index=%d (stat=%c)\n",
+         cp->cp,
+         cp->contributor ? cp->contributor->index : -1,
+         cp->contributor ? cp->contributor->stat  : '?');
+}
+
+/*
+ * print_cp_list  --  walk a CP_t linked list and print each node.
+ */
+void print_cp_list(CP_t *cp) {
+  int count = 0;
+  while (cp) {
+    printf("  [%d] ", count++);
+    print_cp(cp);
+    cp = cp->next;
+  }
+}
+
+/*
+ * print_bd  --  one-line summary of a single BD_t node.
+ */
+void print_bd(BD_t *bd) {
+  if (!bd) { printf("BD_t: NULL\n"); return; }
+  printf("BD_t: bd=%d, support=%d\n", bd->bd, bd->support);
+}
+
+/*
+ * print_bd_list  --  walk a BD_t linked list and print each node.
+ */
+void print_bd_list(BD_t *bd) {
+  int count = 0;
+  while (bd) {
+    printf("  [%d] ", count++);
+    print_bd(bd);
+    bd = bd->next;
+  }
+}
+
+/*
+ * print_family  --  one-line summary of a FAMILY_t.
+ */
+void print_family(FAMILY_t *fam) {
+  ELE_DATA_t *m;
+  int mem_count = 0;
+  if (!fam) { printf("FAMILY_t: NULL\n"); return; }
+  m = fam->members;
+  while (m) { mem_count++; m = m->next; }
+  printf("FAMILY_t: index=%d, name='%s', member_count=%d\n",
+         fam->index, fam->name, mem_count);
+}
+
+/*
+ * print_fam_data  --  walk a FAM_DATA_t linked list and print each family.
+ */
+void print_fam_data(FAM_DATA_t *fd) {
+  int count = 0;
+  while (fd) {
+    printf("  [%d] ", count++);
+    print_family(fd->to_family);
+    fd = fd->next;
+  }
 }

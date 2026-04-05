@@ -1,25 +1,64 @@
 /*
- * eleredef.c - Element Redefinition
+ * eleredef.c  --  Stage 3: element redefinition using the syntopy algorithm
  *
- *   Given elements initially defined by single linkage clustering,
- *   redefine (breakup) into subelements at points where an
- *   aggregation of image endpoints exist.
+ * Algorithm overview
+ * ------------------
+ * This is the most complex stage of the RECON pipeline.  It takes the
+ * initial elements from eledef and refines their boundaries by:
+ *
+ * 1. Identifying "Potential Cut Points" (PCPs): positions where many
+ *    full-length image endpoints cluster, suggesting the true boundary
+ *    between two distinct repeat subfamilies.
+ *
+ * 2. Clustering PCPs into "To-Be-Determined" boundaries (TBDs) via
+ *    CP_cluster() and PCP_to_TBDs().
+ *
+ * 3. Dissecting elements at TBD positions (dissect()), splitting MSPs
+ *    that span the boundary into left and right halves.
+ *
+ * 4. Re-clustering the dissected images into child elements (ele_def()).
+ *
+ * 5. Rebuilding edges between elements -- a directed graph where an edge
+ *    between elements A and B means they share full-length (or near full-
+ *    length) MSP images.  Edge type 'p' = primary, 's' = secondary.
+ *
+ * The algorithm operates on "local networks" (clans): BFS subgraphs
+ * centered on each unprocessed element, extending DEPTH hops along edges.
+ * This bounds peak memory use to O(DEPTH-hop neighbourhood size).
+ *
+ * Multi-round convergence:
+ *   The main loop repeats until no element has stat 'z', 'w', or 't'
+ *   (all elements are 'v' or 'X').  New elements created by dissection
+ *   may require further processing in subsequent rounds.
+ *
+ * Element status transitions (see ELE_INFO_t.stat in ele.h for full list):
+ *   'z' -> edges_and_cps() -> 't'
+ *   't' -> ele_redef()     -> 'v' (no further split) or 'w' (combo update)
+ *   'w' -> combo_update()  -> 'v'
+ *   'v' -> (ready for edgeredef)
+ *   'X' -> dismissed (image_count dropped to 0 after dissection)
+ *
+ * Named constants from recon_defs.h (constants formerly #defined here):
+ *   ELEREDEF_CUTOFF_SINGLE (was CUTOFF1 = 0.5)
+ *   ELEREDEF_CUTOFF_DOUBLE (was CUTOFF2 = 0.9)
+ *   ELEREDEF_MAX_IMAGES    (was MAX_IMG  = 1200)
+ *   MIN_ELEMENT_LEN_BP     (was TOO_SHORT = 30)
+ *   SPLIT_RATIO_TOLERANCE  (was FUDGE = 2)
+ *   ELEMENT_BOUNDARY_MARGIN (was MARGIN = 10000)
+ *   MAX_DISSECT_PASSES     (was FLURRY = 10; note: this is a distance
+ *                           threshold in bp, not a count despite the name)
+ *   BFS_CLAN_DEPTH         (was DEPTH = 3)
+ *
+ * Usage
+ *   eleredef seq_list [start] [clan_ct] [-l log_level]
+ *
+ *   -l <level>  log verbosity: 0=silent 1=error 2=warn 3=info 4=debug
+ *               (default: 3=info)
  *
  * Author: Zhirong Bao
- * Minor modifications by: Robert Hubley, Institute for Systems Biology
- *
- * RMH Notes:
- *   Element info stat:  'z', 't', 'v', 'w', 'y', 'x' and 'X'
- *      'z' - appears to be initial state
- *      'v' - I have image-end-selection rule
- *      'w' - Secondary edges are defined
- *      'y' - Already been traversed has no neighbors
- *      't' - set at the end of edges_and_cps()
- *      'X' - appears to indicate deleted or 'dismissed' element
- *      PCP and TBD...need defining
- *          - breakup elements
- *  flimg_no = Full Length Image Number (count)
+ * Modifications: Robert Hubley, Institute for Systems Biology
  */
+
 #include <fcntl.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -30,23 +69,13 @@
 #include "seqlist.h"
 #include "treeview.h"
 
-#define CUTOFF1 0.5
-#define CUTOFF2 0.9
-#define MAX_IMG 1200
-// RMH: "The minimum length of an element, for example,
-//       the maximal length that we expect the pairwise
-//       alignment tool to spuriously extend by chance
-//       from a true element boundary, used in the image
-//       end selection rule and the element reevaluation
-//       and update procedure."
-#define TOO_SHORT 30
-// RMH: Not sure yet.  Could be:
-//      "The ratio cutoff for splitting an element at a
-//       given position used in the element reevaluation
-//       and update procedure."
-#define FUDGE 2
-#define MARGIN 10000
-#define FLURRY 10
+/* All constants now come from recon_defs.h via ele.h -> msps.h -> bolts.h.
+ * Backward-compat aliases (CUTOFF1, CUTOFF2, MAX_IMG, TOO_SHORT, FUDGE,
+ * MARGIN, FLURRY) are defined there and remain usable throughout this file. */
+
+/* ---- Per-program log level storage (required by recon_log.h) ---- */
+int   recon_log_level = RECON_LOG_INFO;
+FILE *recon_log_fp    = NULL;
 
 //typedef struct img_node {
 //  short recorded;
@@ -130,9 +159,20 @@ int main (int argc, char *argv[]) {
   FILE *ele_no, *msp_no, *edge_no, *size_list, *new_stat;
   FILE *seq_list;
 
-  /* processing command line */
+  /* Strip optional "-l <level>" before positional arg parsing */
+  if (recon_parse_log_flag(&argc, argv)) {
+    fprintf(stderr, "error: -l requires a numeric log level argument\n");
+    exit(1);
+  }
+
+  /* Validate command line */
   if (argc == 1) {
-    printf("usage: eleredef seq_list start clan_ct\n where seq_list is the list of sequence names, start is the index of the element to start redefining, and clan_ct is the number to start counting the number of clans.  The latter two are optional.\n");
+    printf("usage: eleredef seq_list [start] [clan_ct] [-l level]\n"
+           "  seq_list  list of sequence names\n"
+           "  start     1-based element index to start from (optional, default 1)\n"
+           "  clan_ct   initial clan counter value (optional, default 0)\n"
+           "  -l <level>  log verbosity: 0=silent 1=error 2=warn "
+           "3=info(default) 4=debug\n");
     exit(1);
   }
 
@@ -200,6 +240,8 @@ int main (int argc, char *argv[]) {
     printf("Can not open tmp2/log for writing! Exiting\n");
     exit(1);
   }
+  /* Route RECON_LOG macros to the same file as the pipeline log */
+  recon_log_fp = log_file;
 
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);
@@ -274,7 +316,7 @@ int main (int argc, char *argv[]) {
 
   if ( ! img_ptr )
   {
-    printf("eleredef: Error! Could not allocate memory for img_ptr: %d bytes requested\n", ( MAX_IMG*sizeof(IMAGE_t *) ) );
+    printf("eleredef: Error! Could not allocate memory for img_ptr: %zu bytes requested\n", ( MAX_IMG*sizeof(IMAGE_t *) ) );
     exit(-1);
   }
 
@@ -340,10 +382,10 @@ int main (int argc, char *argv[]) {
   fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d rounds, %d files read, %d msps seen, %d edges seen\n", rounds, files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
-  printf("General_ele_redef %f , %f , %f \n",cpu_time_used, ele_defTIME, dissectTIME);
-  printf("total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
-  printf("%d rounds, %d files read, %d msps seen, %d edges seen\n", rounds, files_read, msp_ct, edge_ct);
-  printf("%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
+  RLOG_DBG("General_ele_redef %f , %f , %f \n", cpu_time_used, ele_defTIME, dissectTIME);
+  RLOG_DBG("total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
+  RLOG_DBG("%d rounds, %d files read, %d msps seen, %d edges seen\n", rounds, files_read, msp_ct, edge_ct);
+  RLOG_DBG("%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
   fflush(log_file);
   fclose(log_file);
 
@@ -527,7 +569,7 @@ ELE_DATA_t *ele_def(IMG_DATA_t **img_data_p, float cutoff) {
 
 
 void generate_img_tree(ELEMENT_t *ele) {
-  printf("generate_img_tree element: %d \n", ele->index);
+  RLOG_DBG("generate_img_tree: ele %d\n", ele->index);
   IMAGE_t **img_array = (IMAGE_t **) malloc(ele->img_no*sizeof(IMAGE_t *));
   IMG_DATA_t *cur;
   int ct=0;
@@ -613,8 +655,8 @@ void add_ele_info(ELE_INFO_t *ele_info_tmp) {
 void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
   int i;
   ELE_DATA_t *local_net=NULL, *local_net_tail=NULL;
-  // Read in stage 1 element from "e#" ( where # is ele_info->index ).
-  printf("general_ele_redef: %d\n",ele_info->index);
+  /* Read in stage 1 element from "e#" ( where # is ele_info->index ). */
+  RLOG_DBG("general_ele_redef: ele %d\n", ele_info->index);
   if (!ele_info->ele) ele_read_in(ele_info, 1);
   //RMH
   //  status still 'z', but file_updated is now 1
@@ -650,22 +692,20 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     //             is built up by this method.
     build_local_network(ele_info, &local_net, &local_net_tail, img_ptr);
 
-    // RMH: TODO: Describe the in-memory datastructure at this moment.  For
-    //            instance, what does local_net look like.  What is ele->PCP store?
-    //print_ele_data( local_net );
-    //print_local_network(local_net);
-    print_all_eles_GML();
+    /* Debug: dump the local network graph as GML */
+    if (recon_log_level >= RECON_LOG_DEBUG) print_all_eles_GML();
 
     fprintf(log_file, "clan size: %d, clan core size: %d\n", clan_size, clan_core_size);
     fflush(log_file);
 
-    // redefining elements in the local network 
-    //   -- queues up all elements in the local_net linked list
-    //      and calls local_ele_redef on each
+    /*
+     * Redefine elements in the local network:
+     * queues all elements in local_net and calls local_ele_redef on each.
+     */
     cruise_local_net(local_net, img_ptr);
 
-    //print_local_network(local_net);
-    print_all_eles_GML();
+    /* Debug: dump the updated graph */
+    if (recon_log_level >= RECON_LOG_DEBUG) print_all_eles_GML();
 
     /* clearing up the local network */
     fflush(new_msps);
@@ -680,7 +720,7 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
   ELEMENT_t *ele;
   ELE_DATA_t *que;
-  printf("build local network: %d\n", ele_info->index);
+  RLOG_DBG("build_local_network: seed ele %d\n", ele_info->index);
   /* seed the network with the first element */
   que = (ELE_DATA_t *) malloc(sizeof(ELE_DATA_t));
   que->ele_info = ele_info;
@@ -693,7 +733,8 @@ void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **
   /* breadth first search */
   while (que) {
     clan_size ++;
-    printf("queue entry: %d\n", que->ele_info->ele->index);
+    RLOG_DBG("build_local_network: BFS queue entry ele %d\n",
+             que->ele_info->ele->index);
     // RMH: DEPTH currently set in bolts.h to 3
     if (que->ele_info->ele->l_hold <= DEPTH) {
       clan_core_size ++;
@@ -713,12 +754,12 @@ void build_local_network(ELE_INFO_t *ele_info, ELE_DATA_t **net_p, ELE_DATA_t **
 void recruit(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, ELE_DATA_t **net_tail_p, IMAGE_t **img_ptr) {
   ELE_INFO_t *epi;
   ELE_DATA_t *member;
-  printf("recruit element: %d\n", ele_info->index);
+  RLOG_DBG("recruit: ele %d\n", ele_info->index);
   if (rt->l) recruit(ele_info, rt->l, net_tail_p, img_ptr);
 
-  // Extract the partner element using the edge information
+  /* Extract the partner element using the edge information */
   epi = linked_ele(ele_info, rt->to_edge);
-  printf("recruit element epi: %d\n", epi->index);
+  RLOG_DBG("recruit: partner ele %d\n", epi->index);
   if (!epi->ele) ele_read_in(epi, 1);
   if (!epi->ele->l_hold) {
     epi->ele->l_hold = ele_info->ele->l_hold + 1;
@@ -764,17 +805,10 @@ void local_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr, int *march_p) {
     ELE_DATA_t *new_ele_data;
     ELEMENT_t *ele = ele_info->ele;
 
-    // RMH: Debug
-    printf("local_ele_redef(): ele_info->index=%d, ele_info->stat=%c, ", ele_info->index, ele_info->stat);
-    if ( ele->redef != NULL )
-      printf("ele->redef=*, ");
-    else
-      printf("ele->redef=Null, ");
-    if ( ele->PCP )
-      printf("ele->PCP=*\n");
-    else
-      printf("ele->PCP=Null\n");
-    //
+    RLOG_DBG("local_ele_redef(): ele %d stat=%c redef=%s PCP=%s\n",
+             ele_info->index, ele_info->stat,
+             ele->redef ? "yes" : "NULL",
+             ele->PCP   ? "yes" : "NULL");
 
     if (ele->redef != NULL) {
       new_ele_data = ele->redef;
@@ -914,14 +948,14 @@ void ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
       PCP_to_TBDs(cur_ele);
     }
     else{
-      printf("the name of the element without a PCP is %d \n", cur_ele->index);
+      RLOG_DBG("ele_redef: ele %d has no PCP\n", cur_ele->index);
     }
     if (cur_ele->TBD) {
       TBD_merge(cur_ele);
     }
     if (cur_ele->TBD) {
 #if 0
-      to_dissect = 1;\  
+      to_dissect = 1;\
       if (cur_ele->TBD->bd - cur_ele->frag.lb <= FLURRY || cur_ele->TBD->bd - cur_ele->frag.rb >= -FLURRY) {
 	if (!cur_ele->TBD->next) {
 	  to_dissect = 0;
@@ -1039,7 +1073,8 @@ IMG_DATA_t *img_data_sort(IMG_DATA_t *img_data, int ct) {
 
 
 void PCP_to_TBDs(ELEMENT_t *ele) {
-      printf("PCP_to_TBD stat 1 %ld %ld \n", ele->index , ele->PCP->contributor->index );
+  RLOG_DBG("PCP_to_TBDs: ele %d, first PCP contributor ele %d\n",
+           ele->index, ele->PCP->contributor->index);
   int s = 0, left;
   BD_t *pbd_tmp, *pbd_prev, *pbd, *pbds;
   CP_t *cp;
@@ -1536,7 +1571,7 @@ void remove_image(IMAGE_t *i) {
 
 
 void combo_update(ELE_INFO_t *ele_info) {
-  printf("combo_update before stat: %f \n", ele_info->stat);
+  RLOG_DBG("combo_update before stat: %d\n", ele_info->stat);
   if (ele_info->ele->img_no < 0) {
     err_no ++;
     fprintf(log_file, "error:  combo ele %d has %d images\n", ele_info->index, ele_info->ele->img_no);
@@ -1579,7 +1614,7 @@ void combo_update(ELE_INFO_t *ele_info) {
       }
       else obs_output(ele_info);
     }
-      printf("combo_update after stat: %f \n", ele_info->stat);
+  RLOG_DBG("combo_update after stat: %d\n", ele_info->stat);
 }
 
 
@@ -1688,8 +1723,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     int32_t max_score=0;
     short dir;
 
-    // RMH: DEBUG TODO remove
-    printf("edges_and_cps: ele_info->index = %d, ele_info->ele->index = %d\n", ele_info->index, ele_info->ele->index);
+    RLOG_DBG("edges_and_cps: ele_info->index = %d, ele_info->ele->index = %d\n", ele_info->index, ele_info->ele->index);
 
     /* sort unprocessed images according to their partner element,
      * and then their left bounds to allocate proper amount of memory
@@ -1717,9 +1751,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
       }
       cur_img_data = cur_img_data->next;
     }
-    // RMH: start
-    printf("edges_and_cps: img_no = %d, eff_img_ct = %d\n", cur_ele->img_no, eff_img_ct);
-    // RMH: end
+    RLOG_DBG("edges_and_cps: img_no = %d, eff_img_ct = %d\n", cur_ele->img_no, eff_img_ct);
 
   if (eff_img_ct) {
     token_image = (IMAGE_t *) malloc(sizeof(IMAGE_t));
@@ -1767,8 +1799,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
       cur_img = *(img_ptr+i);
       img_partner = partner(cur_img);
 
-      // RMH: DEBUG TODO remove
-      printf("edges_and_cps: image cur_ele_info->index=%d, par_ele_info->index=%d\n", cur_img->ele_info->index, img_partner->ele_info->index );
+      RLOG_DBG("edges_and_cps: image cur_ele_info->index=%d, par_ele_info->index=%d\n", cur_img->ele_info->index, img_partner->ele_info->index);
 
       if (ritetime) { /* new ele_partner begins */
 	epi = img_partner->ele_info;
@@ -1786,13 +1817,13 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
         //      So unless the sequence is < 200bp it simply requires
         //      that the image is within 10bp of the endpoints of the element.
 	if (full_length(cur_img, CUTOFF2)) {
-          printf("edges_and_cps:     image is primary because full_length with current element!\n");
+          RLOG_DBG("edges_and_cps:     image is primary because full_length with current element!\n");
 	  prim = 1;
           // Increment the full length image counter
 	  cur_ele->flimg_no ++;
 	}
 	if (full_length(img_partner, CUTOFF2)) {
-          printf("edges_and_cps:     image is primary because full_length with partner element!\n");
+          RLOG_DBG("edges_and_cps:     image is primary because full_length with partner element!\n");
 	  prim = 1;
           // Increment the full length image counter
 	  ele_partner->flimg_no ++;
@@ -1805,7 +1836,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
           // RMH: Track maximum scoring primary (full length)
           //      image.
 	  if (cur_img->to_msp->iden > max_score) {
-            printf("edges_and_cps:     **** image is the new high scoring primary!\n");
+            RLOG_DBG("edges_and_cps:     **** image is the new high scoring primary!\n");
 	    max_score = cur_img->to_msp->iden;
 	    dir = cur_img->to_msp->direction;
 	    prim_p =  cur_img->to_msp;
@@ -1815,14 +1846,14 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	if (!prim_p) {
           // RMH: No full length images found yet
           //      NOTE: Prequal flag is set
-          printf("edges_and_cps:      Adding to consis tree (not full-length and no full-length found yet): e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
+          RLOG_DBG("edges_and_cps:      Adding to consis tree (not full-length and no full-length found yet): e%d im = %s:%d-%d   e%d pt = %s:%d-%d\n", epi->index, cur_img->frag.seq_name, cur_img->frag.lb, cur_img->frag.rb, img_partner->ele_info->index, img_partner->frag.seq_name, img_partner->frag.lb, img_partner->frag.rb);
 	  consis_tree_build(consis_rt, cur_img, 1);
           //print_consis_tree(consis_rt);
           //print_ascii_tree(consis_rt);
 	}
       }
       if (img_partner->ele_info->index != epi->index || i == eff_img_ct-1) {
-        printf("edges_and_cps:     Reached the end of the current element partner -- will reprocess this current image!\n");
+        RLOG_DBG("edges_and_cps:     Reached the end of the current element partner -- will reprocess this current image!\n");
         // reached the end of the current ele_partner
 	// start a new ele_partner
 	ritetime = 1;
@@ -1836,13 +1867,12 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	} else { // if no full-length, find partial primary images
           // This identifies partial primary images by looking for fragments that share an outside edge
 	  prim = find_prim(consis_rt->children, CUTOFF2, ele_info->ele->frag.lb, -1, 0, 0, 0, 0, 0, &token_mark, &max_score, &dir);
-          // RMH: Debug - TODO remove
           if ( prim )
-            printf("DEBUG: Identified partial primary image!\n");
+            RLOG_DBG("edges_and_cps:     Identified partial primary image!\n");
 	}
 	/* build edge */
 	if (prim) {
-          printf("edges_and_cps:     Adding primary edge!\n");
+          RLOG_DBG("edges_and_cps:     Adding primary edge!\n");
 	  if (ele_info->index != epi->index) add_edge(ele_info, epi, 'p', max_score, dir);
 	  else {
 	    err_no ++;
@@ -1865,7 +1895,7 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
 	    }
 	  }
 	} else { /* no primary images, full-length or partial */
-          printf("edges_and_cps:     Adding secondary edge!\n");
+          RLOG_DBG("edges_and_cps:     Adding secondary edge!\n");
 	  if (ele_info->index != epi->index) add_edge(ele_info, epi, 's', 0, 0);
           else {
             err_no ++;
@@ -1874,11 +1904,11 @@ void edges_and_cps(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
           }
 	}
 	if (consis_rt->children != NULL) {
-          printf("Freeing tree!\n");
+          RLOG_DBG("edges_and_cps:     Freeing consis tree\n");
 	  consis_tree_free(consis_rt->children);
 	  consis_rt->children = NULL;
 	}
-      }else { printf("NOT SURE\n"); }
+      }else { RLOG_DBG("edges_and_cps:     image fell through all cases (NOT SURE)\n"); }
     }
 //printf("printing edge tree\n");
 //print_edge_tree(ele_info->ele->edges, 0);
@@ -2353,9 +2383,7 @@ int find_prim(IMG_NODE_t *nd, float cutoff, int32_t end1, int32_t end2, int32_t 
     //   efl1 = ~length(img1)         efl1 = ~length(img2)
     //
     /*if (1.0*al1/efl1 > cutoff || 1.0*al2/efl2 > cutoff) {*/
-    // RMH: DEBUG TODO remove
-    printf("al1=%d al2=%d efl1=%d efl2=%d:  al/ef %f, %f   ef-al %d, %d  ele:%d-%d, ptn:%d-%d\n", al1, al2, efl1, efl2,(1.0*al1/efl1), (1.0*al2/efl2), (efl1-al1), (efl2-al2), nd->to_image->ele_info->ele->frag.lb, nd->to_image->ele_info->ele->frag.rb, ipt->ele_info->ele->frag.lb, ipt->ele_info->ele->frag.rb );
-    // RMH: end
+    RLOG_DBG("find_prim: al1=%d al2=%d efl1=%d efl2=%d:  al/ef %f, %f   ef-al %d, %d  ele:%d-%d, ptn:%d-%d\n", al1, al2, efl1, efl2, (1.0*al1/efl1), (1.0*al2/efl2), (efl1-al1), (efl2-al2), nd->to_image->ele_info->ele->frag.lb, nd->to_image->ele_info->ele->frag.rb, ipt->ele_info->ele->frag.lb, ipt->ele_info->ele->frag.rb);
     if ( (1.0*al1/efl1 > cutoff || 1.0*al2/efl2 > cutoff) && (efl1-al1 < 30 || efl2-al2 < 30) ) {
       sum = 1;
       mark = 1;
