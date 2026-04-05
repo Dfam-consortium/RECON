@@ -5,10 +5,16 @@
 Because much of the refactoring and optimization work in this repository was
 performed with AI coding assistance rather than by manual rewrite, output
 correctness is validated systematically by comparing the pipeline's results
-against those of the original released binary (RECON 1.08).  This document
-describes the validation infrastructure, the test scripts, and the
-`-DORIGINAL_BUGS` compilation flag that makes apples-to-apples comparison
-possible.
+against those of the original released binary (RECON 1.08) -- input/output
+equivalance testing.  This document describes the validation infrastructure,
+the test scripts, and the `-DORIGINAL_BUGS` compilation flag that preserves
+the original 1.08 behaviour.  
+
+The short term goal is to make some long waited improvements to to the codebase
+while maintaining API stability and output consistency in-line with the principals
+of https://rewrites.bio. The long-term goal will be to develop unit tests for 
+the core algorithms so that future changes can be validated not by equivalence 
+testing but rather by fine-scale characterisation of functional correctness. 
 
 ---
 
