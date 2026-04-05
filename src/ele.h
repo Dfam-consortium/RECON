@@ -36,6 +36,9 @@
  * Modifications: Robert Hubley, Institute for Systems Biology
  */
 
+#ifndef ELE_H
+#define ELE_H
+
 #include "msps.h"
 #include "recon_log.h"
 
@@ -353,10 +356,7 @@ extern int32_t err_no;       /* accumulated error count; non-zero triggers exit 
  * ele_info_tail  -- tail pointer for O(1) append to the overflow list. */
 extern ELE_INFO_t *ele_info_data, *ele_info_tail;
 
-extern FAM_DATA_t *FAMs;
-
 /* Pipeline output files -- opened by each program's main() */
-extern FILE *err;         /* error / diagnostic messages */
 extern FILE *new_msps;    /* new MSP records created during dissection */
 extern FILE *eles;        /* final elements output (famdef summary/eles) */
 extern FILE *unproc;      /* elements removed as large tandems or dismissed */
@@ -372,3 +372,5 @@ extern FILE *log_file;    /* primary pipeline progress log */
 #include "ele_db.h"
 
 /* All function implementations are in ele.c */
+
+#endif /* ELE_H */
