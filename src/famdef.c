@@ -113,6 +113,9 @@ int main (int argc, char *argv[]) {
   log_file = fopen("tmp/log2", "w");
   recon_log_fp = log_file;
 
+  /* Open element database (read by this stage; compacted at exit) */
+  ele_db_open();
+
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);
   }
@@ -184,6 +187,8 @@ int main (int argc, char *argv[]) {
   fflush(log_file);
   fclose(log_file);
 
+  ele_db_compact();
+  ele_db_close();
 
   exit(0);
 }

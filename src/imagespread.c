@@ -1,6 +1,11 @@
 /*
  * imagespread.c  --  Stage 1: distribute MSP images across output files
  *
+ * DEPRECATED: This program is no longer called by the RECON pipeline.
+ * Its functionality (partitioning MSP images) has been merged into eledef,
+ * which now reads the MSP file directly and sorts images in memory.
+ * imagespread is retained here for reference only.
+ *
  * Algorithm overview
  * ------------------
  * This is the first stage of the RECON pipeline.  It reads a sorted MSP

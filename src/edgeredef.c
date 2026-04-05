@@ -122,6 +122,9 @@ int main (int argc, char *argv[]) {
   }
   recon_log_fp = log_file;
 
+  /* Open element database (updated by this stage) */
+  ele_db_open();
+
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);
   }
@@ -163,10 +166,8 @@ int main (int argc, char *argv[]) {
   for (i=start; i<ele_ct; i++) {
     if ((*(all_ele+i))->stat != 'O' && (*(all_ele+i))->stat != 'X') {
       fprintf(log_file, "evaluating edges of element %d\n", (*(all_ele+i))->index);
-      fflush(log_file);
       if ((*(all_ele+i))->stat == 'v') {
 	general_edge_redef(*(all_ele+i));
-	report_redef_stat();
       } else if((*(all_ele+i))->stat != 'y') {
 	err_no ++;
 	fprintf(log_file, "ele %d %c not properly defined\n",  (*(all_ele+i))->index, (*(all_ele+i))->stat);
@@ -179,7 +180,6 @@ int main (int argc, char *argv[]) {
   for (i=start; i<ele_ct; i++) {
     if ((*(all_ele+i))->stat != 'O' && (*(all_ele+i))->stat != 'X') {
       fprintf(log_file, "repairing edges of element %d\n", (*(all_ele+i))->index);
-      fflush(log_file);
       if ((*(all_ele+i))->stat == 'y') {
         edge_repair(*(all_ele+i));
       } else {
@@ -191,12 +191,15 @@ int main (int argc, char *argv[]) {
     }
   }
 
+  report_redef_stat();
+
   fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d files read, %d msps seen, %d edges seen\n", files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
   fflush(log_file);
   fclose(log_file);
 
+  ele_db_close();
 
   exit(0);
 }

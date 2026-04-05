@@ -243,6 +243,9 @@ int main (int argc, char *argv[]) {
   /* Route RECON_LOG macros to the same file as the pipeline log */
   recon_log_fp = log_file;
 
+  /* Open element database (written by eledef, updated by this stage) */
+  ele_db_open();
+
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);
   }
@@ -327,7 +330,6 @@ int main (int argc, char *argv[]) {
     rounds ++;
     for (i=start; i<ele_ct && i<ele_array_size; i++) {
       fprintf(log_file, "Evaluating definition of element %d\n", (*(all_ele+i))->index);
-      fflush(log_file);
       if ((*(all_ele+i))->stat == 'z' || (*(all_ele+i))->stat == 'w' || (*(all_ele+i))->stat == 't') {
 	to_march = 1;
 	general_ele_redef(*(all_ele+i), img_ptr);
@@ -345,7 +347,6 @@ int main (int argc, char *argv[]) {
     cur_ele_info = ele_info_data;
     while(cur_ele_info) {
       fprintf(log_file, "evaluating definition of element %d\n", cur_ele_info->index);
-      fflush(log_file);
       if (cur_ele_info->stat == 'z' || cur_ele_info->stat == 'w' || cur_ele_info->stat == 't') {
 	to_march = 1;
 	general_ele_redef(cur_ele_info, img_ptr);
@@ -388,6 +389,8 @@ int main (int argc, char *argv[]) {
   RLOG_DBG("%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
   fflush(log_file);
   fclose(log_file);
+
+  ele_db_close();
 
   exit(0);
 }
@@ -672,18 +675,14 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
   } else {
     /* redefining cur_ele and its adjacent neighbors */
     fprintf(new_msps, "new clan for ele %d\n", ele_info->index);
-    fflush(new_msps);
     fprintf(combo, "new clan for ele %d\n", ele_info->index);
-    fflush(combo);
     fprintf(obs, "new clan for ele %d\n", ele_info->index);
-    fflush(obs);
     /* set up the local network */
     clan_ct ++;
     clan_size = 0;
     clan_core_size = 0;
 
     fprintf(log_file, "new clan: %d for ele %d\n", clan_ct, ele_info->index);
-    fflush(log_file);
 
     // RMH: Build a graph centered on ele_info and extending out 3 degrees
     //      of separation. TODO: Add details of edge labeling.
@@ -696,7 +695,6 @@ void general_ele_redef(ELE_INFO_t *ele_info, IMAGE_t **img_ptr) {
     if (recon_log_level >= RECON_LOG_DEBUG) print_all_eles_GML();
 
     fprintf(log_file, "clan size: %d, clan core size: %d\n", clan_size, clan_core_size);
-    fflush(log_file);
 
     /*
      * Redefine elements in the local network:

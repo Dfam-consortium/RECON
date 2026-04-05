@@ -1,9 +1,10 @@
 /*
- * eledef.c  --  Stage 2: initial element definition by single-linkage clustering
+ * eledef.c  --  Stage 1: image sorting and initial element definition
  *
  * Algorithm overview
  * ------------------
- * This stage reads the sorted IMAGE files produced by imagespread and groups
+ * This stage reads the MSP file directly, creates IMAGE records in memory
+ * (merged from the former imagespread stage), sorts them, and groups
  * overlapping images on the same sequence into "elements" using single-linkage
  * clustering (or optionally double-linkage via the "double" method).
  *
@@ -26,7 +27,7 @@
  *
  * Two-pass output:
  *   Pass 1 (ele_def):  clusters images -> elements, writes ele_def_res/img_prot
- *   Pass 2 (DUMBBELL): loads MSP detail from msp_file, writes ele_def_res/e<N>
+ *   Pass 2 (dumbbell): loads MSP detail from msp_file, writes element database
  *
  * Usage
  *   eledef seq_list msp_file single|double [cutoff] [-l log_level]
@@ -37,21 +38,15 @@
  * Author: Zhirong Bao
  * Modifications: Robert Hubley, Institute for Systems Biology
  *
- * Notes on macros
- * ---------------
- * Several inner-loop operations are implemented as macros for performance.
- * Each macro is documented at its definition site with its preconditions,
- * postconditions, and side effects.
+ * NOTE: imagespread functionality (partitioning MSP images) has been merged
+ * into this stage.  imagespread is retained in the source tree for reference
+ * only.
  */
 
 #include "seqlist.h"
 #include "msps.h"
 #include "recon_log.h"
-
-/* freopen() inside the DUMBBELL macro is called for its side-effect;
- * the return value is intentionally ignored (failure is caught by the
- * subsequent fprintf calls which will silently no-op on a NULL stream). */
-#pragma GCC diagnostic ignored "-Wunused-result"
+#include "ele_db.h"
 
 /* ELEDEF_IMGPROT_CAP defined in recon_defs.h (pulled in via bolts.h).
  * IMG_CAP is the backward-compat alias. */
@@ -118,7 +113,7 @@ typedef struct ele_prototype {
 
 
 /* ---- Function prototypes ---- */
-void ele_def(int, FILE *, float, EPROT_t **, int *, MPROT_t **);
+void ele_def(int, IMAGE_t *, int, float, EPROT_t **, int *, MPROT_t **);
 void img_charge(IPROT_t **, int, FILE *);
 int  index_cmp(const void *, const void *);
 
@@ -127,235 +122,379 @@ void print_mprot(MPROT_t *m);
 void print_iprot(IPROT_t *ip);
 void print_eprot(EPROT_t *ep);
 
-/* Output file handles (global so macros can access them) */
-FILE *msp_no, *all_ele, *img_prot, *ele_no, *err, *size_list;
+/*
+ * Static helper functions (previously macros).
+ * These are file-local and will be inlined by the compiler under -O.
+ */
+static void save_element_to_ep_list(int ecp, int img_ct, FRAG_t ele_frag,
+                                    EPROT_t **all_epp, EPROT_t **ep_tail_p);
+static void save_img_to_remaining_list(IMAGE_t img,
+                                       IMG_DATA_t **remain_p,
+                                       IMG_DATA_t **tail_p);
+static void include_image(IMG_DATA_t **cur_p, IMG_DATA_t **prev_p,
+                          IMG_DATA_t **remain_p, IMG_DATA_t **tail_p,
+                          FRAG_t *ele_frag_p, int ecp,
+                          MPROT_t **all_mprot, int method, float cutoff,
+                          int *img_ct_p);
+static void init_element_from_remain_list(short *ritetime_p, int *ecp,
+                                          int *img_ct_p, FRAG_t *ele_frag_p,
+                                          MPROT_t **all_mprot,
+                                          IMG_DATA_t **remain_p,
+                                          IMG_DATA_t **cur_p,
+                                          IMG_DATA_t **prev_p);
+static int  evaluate_remaining_image(IMG_DATA_t **cur_p, IMG_DATA_t **prev_p,
+                                     IMG_DATA_t **remain_p, IMG_DATA_t **tail_p,
+                                     FRAG_t *ele_frag_p, int ecp,
+                                     MPROT_t **all_mprot, int method, float cutoff,
+                                     int *img_ct_p, EPROT_t **all_epp,
+                                     EPROT_t **ep_tail_p, short *ritetime_p);
+static void dumbbell_flush(IPROT_t **all_iprot, IPROT_t **iprot_shadow,
+                           int iprot_ct, MPROT_t **all_mprot,
+                           FILE *msp_file);
+
+/* Output file handles (global so helper functions can access them) */
+FILE *naive_eles, *img_prot, *ele_no, *err, *size_list;
 
 
 /* ============================================================
- * Macros
+ * Image sort comparator for the merged imagespread pass
  *
- * These macros are used inside ele_def() for performance-critical
- * inner loops.  They are documented here with their preconditions,
- * side effects, and the variables they read/modify.
+ * Sort order: seq_name (string asc) -> lb (asc) -> rb (desc) -> index (asc).
+ * This matches the order produced by imagespread's sort(1) invocation.
+ * ============================================================ */
+static int image_sort_cmp(const void *a, const void *b) {
+  const IMAGE_t *ia = (const IMAGE_t *)a;
+  const IMAGE_t *ib = (const IMAGE_t *)b;
+  int sc = strcmp(ia->frag.seq_name, ib->frag.seq_name);
+  if (sc != 0) return sc;
+  if (ia->frag.lb != ib->frag.lb) return ia->frag.lb - ib->frag.lb;
+  if (ia->frag.rb != ib->frag.rb) return ib->frag.rb - ia->frag.rb;
+  return ia->index - ib->index;
+}
+
+
+/* ============================================================
+ * Static helper functions (formerly macros)
+ *
+ * These were converted from preprocessor macros to static functions.
+ * Declaring them static allows the compiler to inline them under -O,
+ * matching the original macro performance while gaining debuggability
+ * and type safety.
  * ============================================================ */
 
 /*
- * INCLUDE_IMAGE
+ * save_element_to_ep_list  --  append the current element to the ep list
  *
- * Test whether the current "remain" list image (pointed to by 'cur') overlaps
- * the current element (ele_frag) enough to be admitted, and if so, incorporate
- * it into the element or move past it.
+ * Allocates a new EPROT_t, fills it from the current element state, links
+ * it onto the tail of *all_epp, and writes a summary line to all_ele
+ * (summary/naive_eles).
  *
- * Preconditions:
- *   cur      points to the IMG_DATA_t node under consideration (remain list)
- *   prev     points to the node before cur (or NULL if cur == remain)
- *   remain   head of the remain list
- *   ele_frag the current element's representative interval
- *   *ecp     the current element index
- *   all_mprot, img_prot, method, cutoff are in scope
- *
- * Postconditions (cov == 1):
- *   - cur is unlinked from the remain list and its memory freed
- *   - ele_frag.rb may be extended if cur's image extends further right
- *   - If rb is extended, cur is reset to remain (re-scan all remaining images)
- *   - img_ct is incremented
- *
- * Postconditions (cov == 0):
- *   - prev advances to cur, cur advances to cur->next (no change to list)
+ * Parameters
+ *   ecp        current element index (1-based)
+ *   img_ct     number of images in this element
+ *   ele_frag   representative genomic interval for this element
+ *   all_epp    head pointer of the ep linked list (modified)
+ *   ep_tail_p  tail pointer of the ep linked list (modified)
  */
-#define INCLUDE_IMAGE \
-    if (method == 1) {cov=sing_cov(&ele_frag, &cur->to_image->frag, cutoff);}\
-            else {cov=doub_cov(&ele_frag, &cur->to_image->frag, cutoff);}\
-            if (cov) {\
-              img_ct ++;\
-	      if (cur->to_image->index%2) {\
-		(*(all_mprot+cur->to_image->index/2))->se = (*ecp);\
-	      } else {\
-		(*(all_mprot+cur->to_image->index/2))->pe = (*ecp);\
-	      }\
-	      fprintf(img_prot, "%d %d\n", (*ecp), cur->to_image->index);\
-              fflush(img_prot);\
-	      if (!cur->next) tail = prev;\
-	      if (prev) prev->next = cur->next;\
-	      else remain = cur->next;\
-	      if (ele_frag.rb < cur->to_image->frag.rb) {\
-		ele_frag.rb = cur->to_image->frag.rb;\
-		free(cur->to_image);\
-		free(cur);\
-		cur = remain;\
-		prev = NULL;\
-	      } else {\
-		free(cur->to_image);\
-		free(cur);\
-		if (prev) cur = prev->next;\
-		else cur = remain;\
-	      }\
-	    } else {\
-	      prev = cur;\
-	      cur = cur->next;\
-	    }
+static void save_element_to_ep_list(int ecp, int img_ct, FRAG_t ele_frag,
+                                    EPROT_t **all_epp, EPROT_t **ep_tail_p) {
+  EPROT_t *ep_tmp = (EPROT_t *) malloc(sizeof(EPROT_t));
+  ep_tmp->flag   = 0;
+  ep_tmp->index  = ecp;
+  ep_tmp->img_no = img_ct;
+  ep_tmp->frag   = ele_frag;
+  ep_tmp->next   = NULL;
+  if (*all_epp) (*ep_tail_p)->next = ep_tmp;
+  else          *all_epp = ep_tmp;
+  *ep_tail_p = ep_tmp;
+  fprintf(naive_eles, "%d %s %d %d\n", ecp, ele_frag.seq_name, ele_frag.lb, ele_frag.rb);
+}
 
 
 /*
- * SAVE_ELEMENT_TO_EP_LIST
+ * save_img_to_remaining_list  --  append an image to the remain list tail
  *
- * Append a new EPROT_t for the just-completed element to the ep linked list,
- * and write a summary line to the naive_eles file.
+ * Copies img onto the heap and appends it to the tail of the remain list.
+ * remain* = img1.next->img2.next->...->tail*
  *
- * Variables read: *ecp, img_ct, ele_frag, all_epp, ep_tail, all_ele
+ * Parameters
+ *   img       IMAGE_t value to copy and append
+ *   remain_p  head pointer of the remain list (modified on first append)
+ *   tail_p    tail pointer of the remain list (always modified)
+ */
+static void save_img_to_remaining_list(IMAGE_t img,
+                                       IMG_DATA_t **remain_p,
+                                       IMG_DATA_t **tail_p) {
+  IMAGE_t    *imgp = (IMAGE_t    *) malloc(sizeof(IMAGE_t));
+  IMG_DATA_t *tmp  = (IMG_DATA_t *) malloc(sizeof(IMG_DATA_t));
+  *imgp = img;
+  tmp->to_image = imgp;
+  tmp->next = NULL;
+  if (!*remain_p) *remain_p = tmp;
+  else            (*tail_p)->next = tmp;
+  *tail_p = tmp;
+}
+
+
+/*
+ * include_image  --  test and admit one remain-list image into the current element
  *
+ * Applies the fractional coverage test (sing_cov or doub_cov) to the image
+ * pointed to by *cur_p against the current element interval *ele_frag_p.
+ *
+ * If the image qualifies (cov == 1):
+ *   - Unlinks *cur_p from the remain list and frees it.
+ *   - Increments *img_ct_p and records the assignment in all_mprot.
+ *   - Extends ele_frag_p->rb if the image reaches further right; if so,
+ *     resets *cur_p to remain (re-scan from head).
+ *   - Otherwise advances *cur_p past the freed node.
+ *
+ * If the image does not qualify (cov == 0):
+ *   - Advances *prev_p and *cur_p without modifying the list.
+ */
+static void include_image(IMG_DATA_t **cur_p,  IMG_DATA_t **prev_p,
+                          IMG_DATA_t **remain_p, IMG_DATA_t **tail_p,
+                          FRAG_t *ele_frag_p, int ecp,
+                          MPROT_t **all_mprot, int method, float cutoff,
+                          int *img_ct_p) {
+  int cov;
+  IMG_DATA_t *cur = *cur_p;
+
+  if (method == 1) cov = sing_cov(ele_frag_p, &cur->to_image->frag, cutoff);
+  else             cov = doub_cov(ele_frag_p, &cur->to_image->frag, cutoff);
+
+  if (cov) {
+    (*img_ct_p)++;
+    if (cur->to_image->index % 2)
+      all_mprot[cur->to_image->index / 2]->se = ecp;
+    else
+      all_mprot[cur->to_image->index / 2]->pe = ecp;
+    fprintf(img_prot, "%d %d\n", ecp, cur->to_image->index);
+
+    /* Unlink cur from the remain list */
+    if (!cur->next) *tail_p = *prev_p;
+    if (*prev_p) (*prev_p)->next = cur->next;
+    else         *remain_p = cur->next;
+
+    if (ele_frag_p->rb < cur->to_image->frag.rb) {
+      /* Element extended: restart remain scan from head */
+      ele_frag_p->rb = cur->to_image->frag.rb;
+      free(cur->to_image);
+      free(cur);
+      *cur_p  = *remain_p;
+      *prev_p = NULL;
+    } else {
+      /* No extension: advance past freed node */
+      free(cur->to_image);
+      free(cur);
+      *cur_p = (*prev_p) ? (*prev_p)->next : *remain_p;
+    }
+  } else {
+    /* Image did not qualify: advance without modifying the list */
+    *prev_p = cur;
+    *cur_p  = cur->next;
+  }
+}
+
+
+/*
+ * init_element_from_remain_list  --  seed a new element from the remain list head
+ *
+ * Unlinks the head of the remain list (pointed to by *cur_p, which must equal
+ * *remain_p), initializes a new element from that image, and advances the
+ * remain pointer to the next node.
+ *
+ * Precondition:  *remain_p is non-NULL; *cur_p == *remain_p.
  * Postconditions:
- *   - A new EPROT_t is malloc'd and appended to *all_epp via ep_tail.
- *   - A line is written to all_ele (summary/naive_eles).
+ *   - *ritetime_p set to 0
+ *   - *ecp incremented; *img_ct_p set to 1
+ *   - *ele_frag_p initialized from the unlinked image
+ *   - The image is recorded in all_mprot and written to img_prot
+ *   - *remain_p, *cur_p advanced to the next node; *prev_p set to NULL
  */
-#define SAVE_ELEMENT_TO_EP_LIST \
-      ep_tmp = (EPROT_t *) malloc(sizeof(EPROT_t));\
-      ep_tmp->flag = 0;\
-      ep_tmp->index = (*ecp);\
-      ep_tmp->img_no = img_ct;\
-      ep_tmp->frag = ele_frag;\
-      ep_tmp->next = NULL;\
-      if (*all_epp) ep_tail->next = ep_tmp;\
-      else *all_epp = ep_tmp;\
-      ep_tail = ep_tmp;\
-      fprintf(all_ele, "%d %s %d %d\n", (*ecp), ele_frag.seq_name, ele_frag.lb, ele_frag.rb)
+static void init_element_from_remain_list(short *ritetime_p, int *ecp,
+                                          int *img_ct_p, FRAG_t *ele_frag_p,
+                                          MPROT_t **all_mprot,
+                                          IMG_DATA_t **remain_p,
+                                          IMG_DATA_t **cur_p,
+                                          IMG_DATA_t **prev_p) {
+  IMG_DATA_t *cur = *cur_p;   /* == *remain_p at entry */
+
+  *ritetime_p = 0;
+  (*ecp)++;
+  *img_ct_p   = 1;
+  *ele_frag_p = cur->to_image->frag;
+
+  if (cur->to_image->index % 2)
+    all_mprot[cur->to_image->index / 2]->se = *ecp;
+  else
+    all_mprot[cur->to_image->index / 2]->pe = *ecp;
+  fprintf(img_prot, "%d %d\n", *ecp, cur->to_image->index);
+
+  *remain_p = cur->next;
+  free(cur->to_image);
+  free(cur);
+  *prev_p = NULL;
+  *cur_p  = *remain_p;
+}
 
 
 /*
- * INIT_ELEMENT_FROM_REMAIN_LIST
+ * evaluate_remaining_image  --  process one remain-list image after a new element is started
  *
- * Start a new element using the first image in the remain list.
- * Unlinks that image from remain, sets ritetime=0, and increments *ecp.
+ * If the image overlaps the current element (same sequence, lb within rb by
+ * MIN_OVERLAP_BP), delegates to include_image().
+ * Otherwise, saves the current element and signals the caller to break out of
+ * the inner remain-processing loop.
  *
- * Preconditions:  remain is non-NULL; cur points to remain.
- * Postconditions:
- *   - ele_frag is initialized from cur->to_image->frag
- *   - cur is unlinked from remain; remain advances to its next node
- *   - cur is freed; cur is reset to (new) remain
- *   - prev = NULL (no predecessor in the now-reduced remain list)
- *   - ritetime = 0
+ * Returns 1 if the caller should break (element boundary found), 0 to continue.
  */
-#define INIT_ELEMENT_FROM_REMAIN_LIST \
-	ritetime = 0;\
-	(*ecp) ++;\
-        img_ct = 1;\
-	ele_frag = cur->to_image->frag;\
-	if (cur->to_image->index%2) {\
-	  (*(all_mprot+cur->to_image->index/2))->se = (*ecp);\
-	} else {\
-	  (*(all_mprot+cur->to_image->index/2))->pe = (*ecp);\
-	}\
-	fprintf(img_prot, "%d %d\n", (*ecp), cur->to_image->index);\
-        fflush(img_prot);\
-	remain = cur->next;\
-	free(cur->to_image);\
-	free(cur);\
-	prev = NULL;\
-	cur = remain
+static int evaluate_remaining_image(IMG_DATA_t **cur_p,  IMG_DATA_t **prev_p,
+                                    IMG_DATA_t **remain_p, IMG_DATA_t **tail_p,
+                                    FRAG_t *ele_frag_p, int ecp,
+                                    MPROT_t **all_mprot, int method, float cutoff,
+                                    int *img_ct_p, EPROT_t **all_epp,
+                                    EPROT_t **ep_tail_p, short *ritetime_p) {
+  if (ele_frag_p->seq_name == (*cur_p)->to_image->frag.seq_name &&
+      ele_frag_p->rb - (*cur_p)->to_image->frag.lb > MIN_OVERLAP_BP) {
+    include_image(cur_p, prev_p, remain_p, tail_p, ele_frag_p, ecp,
+                  all_mprot, method, cutoff, img_ct_p);
+    return 0;
+  } else {
+    save_element_to_ep_list(ecp, *img_ct_p, *ele_frag_p, all_epp, ep_tail_p);
+    *ritetime_p = 1;
+    return 1;   /* caller should break */
+  }
+}
 
 
 /*
- * EVALUATE_REMAINING_IMAGE
+ * dumbbell_flush  --  flush one batch of IPROT_t records to the element database
  *
- * Used when processing the remain list after a new element has been started
- * from remain (via INIT_ELEMENT_FROM_REMAIN_LIST).  For each node cur:
- *   - If it overlaps the current element by > MIN_OVERLAP_BP, apply INCLUDE_IMAGE.
- *   - Otherwise, save the element (it is complete) and set ritetime=1 to
- *     restart the remain-list scan with a new seed element.
+ * 1. Calls img_charge() to sort iprot_shadow by image index and load the
+ *    corresponding MSP data from msp_file into each record's to_msp.
+ * 2. Iterates over all_iprot[0..iprot_ct-1] (original insertion order) and
+ *    writes each record to its element buffer.  When the element index changes,
+ *    the previous element's buffer is flushed to ele_db.
  *
- * Note: the > 10 threshold is the MIN_OVERLAP_BP constant (literal 10).
+ * Note: the loop iterates over all_iprot (not iprot_shadow) to preserve the
+ * original MSP-line order within each element; img_charge operates on
+ * iprot_shadow but fills the shared IPROT_t objects that all_iprot also points to.
+ *
+ * Uses globals: size_list (FILE*), cur_ele_fp, cur_ele_buf, cur_ele_buf_size,
+ *               cur_ele_index, g_ep_array.
+ * The cur_ele_* state persists across batch calls -- the caller must flush
+ * the last element after the final batch.
  */
-#define EVALUATE_REMAINING_IMAGE \
-	  if (ele_frag.seq_name == cur->to_image->frag.seq_name \
-              && ele_frag.rb - cur->to_image->frag.lb > MIN_OVERLAP_BP) {\
-	    INCLUDE_IMAGE;\
-	  } else {\
-	    SAVE_ELEMENT_TO_EP_LIST;\
-	    ritetime = 1;\
-	    break;\
-	  }
 
+/* Static state for the dumbbell pass -- persists across batch calls */
+static FILE  *cur_ele_fp       = NULL;
+static char  *cur_ele_buf      = NULL;
+static size_t cur_ele_buf_size = 0;
+static int    cur_ele_index    = -1;
+static EPROT_t **g_ep_array    = NULL;  /* set by dumbbell_init */
 
-/*
- * SAVE_IMG_TO_REMAINING_LIST
- *
- * Append the current image (img) to the tail of the remain linked list.
- * remain* = img1.next->img2.next->img3.next = tail*
- *
- * Variables read: img (IMAGE_t value, copied into heap)
- * Variables modified: remain, tail
- */
-#define SAVE_IMG_TO_REMAINING_LIST \
-	 imgp = (IMAGE_t *) malloc(sizeof(IMAGE_t));\
-	*imgp = img;\
-	tmp = (IMG_DATA_t *) malloc(sizeof(IMG_DATA_t));\
-	tmp->to_image = imgp;\
-	tmp->next = NULL;\
-	if (!remain) {\
-	  remain = tmp;\
-	} else {\
-	  tail->next = tmp;\
-	}\
-	tail = tmp
+static void dumbbell_init(EPROT_t **ep_array) {
+  g_ep_array = ep_array;
+}
 
+static void dumbbell_flush(IPROT_t **all_iprot, IPROT_t **iprot_shadow,
+                           int iprot_ct, MPROT_t **all_mprot,
+                           FILE *msp_file) {
+  int  i, partner_index;
+  IPROT_t *ip;
+  EPROT_t *ep;
 
-/*
- * DUMBBELL
- *
- * Flush a batch of IPROT_t records to their element output files.
- *
- * This macro operates on a shadow copy of the all_iprot array (iprot_shadow,
- * of size iprot_ct) that has been sorted by image index.  For each record:
- *   1. img_charge() loads the corresponding MSP from msp_file.
- *   2. The element file (ele_def_res/e<N>) is opened (or re-opened).
- *   3. The MSP is written as an "msp ..." line.
- *
- * The flag field of EPROT_t prevents the element header from being written
- * more than once per element file.
- *
- * Variables read: iprot_shadow, iprot_ct, ep_array, all_ele, all_iprot,
- *                 msp_file, size_list
- */
-#define DUMBBELL \
-      img_charge(iprot_shadow, iprot_ct, msp_file);\
-      for (i=0; i<iprot_ct; i++) {\
-	if ((*(all_iprot+i))->index%2) {\
-	  partner_index = (*(all_mprot+(*(all_iprot+i))->index/2))->pe;\
-	} else {\
-	  partner_index = (*(all_mprot+(*(all_iprot+i))->index/2))->se;\
-	}\
-	if ((*(all_iprot+i))->to_msp->score) {\
-	  if (!(*(ep_array+((*(all_iprot+i))->ele_index-1)))->flag) {\
-	    sprintf(ele_name, "ele_def_res/e%d", (*(all_iprot+i))->ele_index);\
-	    freopen(ele_name, "w", all_ele);\
-	    fprintf(all_ele, "index %d\n", (*(all_iprot+i))->ele_index);\
-	    fprintf(all_ele, "frag %s %d %d\n", (*(ep_array+((*(all_iprot+i))->ele_index-1)))->frag.seq_name, (*(ep_array+((*(all_iprot+i))->ele_index-1)))->frag.lb, (*(ep_array+((*(all_iprot+i))->ele_index-1)))->frag.rb);\
-            fprintf(all_ele, "img_no %d\n", (*(ep_array+((*(all_iprot+i))->ele_index-1)))->img_no);\
-            fprintf(size_list, "%d %d\n", (*(all_iprot+i))->ele_index, (*(ep_array+((*(all_iprot+i))->ele_index-1)))->img_no);\
-	    (*(ep_array+((*(all_iprot+i))->ele_index-1)))->flag = 1;\
-	  }\
-	  if (partner_index != (*(all_iprot+i))->ele_index) {\
-	    if ((*(all_iprot+i))->index%2) fprintf(all_ele, "msp %d s %d %.1f %d %d %s %d %d %d %s %d %d\n", (*(all_iprot+i))->index, (*(all_iprot+i))->to_msp->score, (*(all_iprot+i))->to_msp->iden, (*(all_iprot+i))->to_msp->direction, partner_index, (*(all_iprot+i))->to_msp->query.frag.seq_name, (*(all_iprot+i))->to_msp->query.frag.lb, (*(all_iprot+i))->to_msp->query.frag.rb, (*(all_iprot+i))->ele_index, (*(all_iprot+i))->to_msp->sbjct.frag.seq_name, (*(all_iprot+i))->to_msp->sbjct.frag.lb, (*(all_iprot+i))->to_msp->sbjct.frag.rb);\
-	    else fprintf(all_ele, "msp %d s %d %.1f %d %d %s %d %d %d %s %d %d\n", (*(all_iprot+i))->index, (*(all_iprot+i))->to_msp->score, (*(all_iprot+i))->to_msp->iden, (*(all_iprot+i))->to_msp->direction, (*(all_iprot+i))->ele_index, (*(all_iprot+i))->to_msp->query.frag.seq_name, (*(all_iprot+i))->to_msp->query.frag.lb, (*(all_iprot+i))->to_msp->query.frag.rb, partner_index, (*(all_iprot+i))->to_msp->sbjct.frag.seq_name, (*(all_iprot+i))->to_msp->sbjct.frag.lb, (*(all_iprot+i))->to_msp->sbjct.frag.rb);\
-	  } else {\
-	    if ((*(all_iprot+i))->index%2) fprintf(all_ele, "msp %d s %d %.1f %d %d %s %d %d %d %s %d %d\n", (*(all_iprot+i))->index, (*(all_iprot+i))->to_msp->score, (*(all_iprot+i))->to_msp->iden, (*(all_iprot+i))->to_msp->direction, partner_index, (*(all_iprot+i))->to_msp->query.frag.seq_name, (*(all_iprot+i))->to_msp->query.frag.lb, (*(all_iprot+i))->to_msp->query.frag.rb, (*(all_iprot+i))->ele_index, (*(all_iprot+i))->to_msp->sbjct.frag.seq_name, (*(all_iprot+i))->to_msp->sbjct.frag.lb, (*(all_iprot+i))->to_msp->sbjct.frag.rb);\
-          }\
-	}\
+  /* Reset shadow to insertion order before img_charge() sorts it */
+  for (i = 0; i < iprot_ct; i++) iprot_shadow[i] = all_iprot[i];
+
+  img_charge(iprot_shadow, iprot_ct, msp_file);
+
+  for (i = 0; i < iprot_ct; i++) {
+    ip = all_iprot[i];
+
+    if (!ip->to_msp->score) continue;   /* scan_msp() failed for this image */
+
+    /* When element changes, flush current buffer to ele_db */
+    if (ip->ele_index != cur_ele_index) {
+      if (cur_ele_fp) {
+        fclose(cur_ele_fp);
+        ele_db_write(cur_ele_index, cur_ele_buf, (int)cur_ele_buf_size);
+        free(cur_ele_buf);
+        cur_ele_buf      = NULL;
+        cur_ele_buf_size = 0;
+        cur_ele_fp       = NULL;
       }
+      /* Open a new buffer for this element */
+      cur_ele_index = ip->ele_index;
+      ep = g_ep_array[ip->ele_index - 1];
+      cur_ele_fp = open_memstream(&cur_ele_buf, &cur_ele_buf_size);
+      if (!cur_ele_fp) { perror("dumbbell_flush: open_memstream"); exit(1); }
+      fprintf(cur_ele_fp, "index %d\n",      ip->ele_index);
+      fprintf(cur_ele_fp, "frag %s %d %d\n", ep->frag.seq_name, ep->frag.lb, ep->frag.rb);
+      fprintf(cur_ele_fp, "img_no %d\n",     ep->img_no);
+      fprintf(size_list,  "%d %d\n",         ip->ele_index, ep->img_no);
+    }
+
+    /* Compute partner element index */
+    if (ip->index % 2)
+      partner_index = all_mprot[ip->index / 2]->pe;
+    else
+      partner_index = all_mprot[ip->index / 2]->se;
+
+    /*
+     * Write the MSP line.
+     *   odd  image: query-ele = partner_index, sbjct-ele = ip->ele_index
+     *   even image: query-ele = ip->ele_index, sbjct-ele = partner_index
+     * Self-MSPs only written for odd images to avoid duplicates.
+     */
+    if (partner_index != ip->ele_index) {
+      if (ip->index % 2)
+        fprintf(cur_ele_fp, "msp %d s %d %.1f %d %d %s %d %d %d %s %d %d\n",
+                ip->index, ip->to_msp->score, ip->to_msp->iden, ip->to_msp->direction,
+                partner_index,   ip->to_msp->query.frag.seq_name,
+                ip->to_msp->query.frag.lb,  ip->to_msp->query.frag.rb,
+                ip->ele_index,   ip->to_msp->sbjct.frag.seq_name,
+                ip->to_msp->sbjct.frag.lb, ip->to_msp->sbjct.frag.rb);
+      else
+        fprintf(cur_ele_fp, "msp %d s %d %.1f %d %d %s %d %d %d %s %d %d\n",
+                ip->index, ip->to_msp->score, ip->to_msp->iden, ip->to_msp->direction,
+                ip->ele_index,   ip->to_msp->query.frag.seq_name,
+                ip->to_msp->query.frag.lb,  ip->to_msp->query.frag.rb,
+                partner_index,   ip->to_msp->sbjct.frag.seq_name,
+                ip->to_msp->sbjct.frag.lb, ip->to_msp->sbjct.frag.rb);
+    } else {
+      if (ip->index % 2)
+        fprintf(cur_ele_fp, "msp %d s %d %.1f %d %d %s %d %d %d %s %d %d\n",
+                ip->index, ip->to_msp->score, ip->to_msp->iden, ip->to_msp->direction,
+                partner_index,   ip->to_msp->query.frag.seq_name,
+                ip->to_msp->query.frag.lb,  ip->to_msp->query.frag.rb,
+                ip->ele_index,   ip->to_msp->sbjct.frag.seq_name,
+                ip->to_msp->sbjct.frag.lb, ip->to_msp->sbjct.frag.rb);
+    }
+  }
+  /* Do NOT flush cur_ele_fp here -- the same element may continue in the next batch */
+}
 
 
 int main (int argc, char *argv[]) {
-  int ele_ct=0, msp_ct, i, method;
+  int ele_ct=0, msp_ct=0, i, method;
   float cutoff;
   char line[150], *m1="single", *m2="double";
   MPROT_t **all_mprot;
   EPROT_t *all_ep=NULL, **ep_array, *ep_tmp;
 
   IPROT_t **all_iprot, **iprot_shadow;
-  int iprot_ct=0, partner_index;
-  char ele_name[50];   /* name of element used as output file name */
+  int iprot_ct=0;
 
-  FILE *frags, *seq_list, *msp_file;
+  FILE *seq_list, *msp_file;
+
+  /* IMAGE array for the merged imagespread pass */
+  IMAGE_t  *images = NULL;
+  int       n_images = 0, img_capacity = 0;
+  MSP_t     cur_msp;
+  int       img_idx;
+  int       pos;
 
   /* Strip the optional "-l <level>" flag before positional arg parsing */
   if (recon_parse_log_flag(&argc, argv)) {
@@ -379,6 +518,7 @@ int main (int argc, char *argv[]) {
     exit(2);
   }
   GetSeqNames(seq_list);
+  fclose(seq_list);
 
   msp_file = fopen(argv[2], "r");
   if (!msp_file) {
@@ -397,39 +537,97 @@ int main (int argc, char *argv[]) {
   if (argc > 4) {
     cutoff = atof(argv[4]);
   } else {
-    /* Defaults from recon_defs.h */
     if (method == 1) { cutoff = ELEDEF_CUTOFF_SINGLE; }
     else             { cutoff = ELEDEF_CUTOFF_DOUBLE; }
   }
 
-  /* Open auxiliary files */
-  if (!(frags = fopen("images/images_sorted", "r"))) {
-    printf("Can not open the fragment list file, exiting.\n");
-    exit(1);
-  }
-  if (!(msp_no = fopen("summary/ori_msp_no", "r"))) {
-    printf("Can not open msp_no, exiting.\n");
-    exit(1);
-  }
-  err      = fopen("ele_def_res/errors",    "w");
-  all_ele  = fopen("summary/naive_eles",    "w");
-  img_prot = fopen("ele_def_res/img_prot",  "w");
-  ele_no   = fopen("summary/naive_ele_no",  "w");
-  size_list= fopen("ele_def_res/size_list", "w");
+  /* Open auxiliary output files */
+  err       = fopen("ele_def_res/errors",    "w");
+  naive_eles= fopen("summary/naive_eles",    "w");
+  img_prot  = fopen("ele_def_res/img_prot",  "w");
+  ele_no    = fopen("summary/naive_ele_no",  "w");
+  size_list = fopen("ele_def_res/size_list", "w");
 
   /* Route RECON_LOG output to the error file */
   recon_log_fp = err;
 
-  /* Read total MSP count written by imagespread */
-  while (fgets(line, 100, msp_no)) {
-    msp_ct = atoi(line);
+  /* Open the element database */
+  ele_db_open();
+
+  /* ============================================================
+   * Stage 1 (merged imagespread): read MSP file, create and sort
+   * IMAGE array.
+   *
+   * Each MSP produces two IMAGE records:
+   *   even index (2k)   = query side
+   *   odd  index (2k+1) = subject side
+   *
+   * Sorted by: seq_name (string), lb (ascending), rb (descending),
+   * index (ascending for stability).
+   * ============================================================ */
+  img_capacity = 8192;
+  images = (IMAGE_t *) malloc(img_capacity * sizeof(IMAGE_t));
+  if (!images) { perror("eledef: malloc images"); exit(1); }
+
+  img_idx = -1;   /* starts at -1 so first ++ gives 0 */
+
+  while (fgets(line, 150, msp_file)) {
+    if (scan_msp(&cur_msp, line)) {
+      RLOG_ERR("Wrong MSP format, skipping line\n");
+      continue;
+    }
+
+    if (n_images + 2 > img_capacity) {
+      img_capacity *= 2;
+      images = (IMAGE_t *) realloc(images, img_capacity * sizeof(IMAGE_t));
+      if (!images) { perror("eledef: realloc images"); exit(1); }
+    }
+
+    /* Even image: query side */
+    img_idx++;
+    pos = GetSeqIndex(0, seq_count - 1, cur_msp.query.frag.seq_name);
+    if (pos < 0) {
+      RLOG_ERR("Sequence %s not found in seq list\n", cur_msp.query.frag.seq_name);
+      exit(4);
+    }
+    images[n_images].index        = img_idx;
+    images[n_images].frag.lb      = cur_msp.query.frag.lb;
+    images[n_images].frag.rb      = cur_msp.query.frag.rb;
+    images[n_images].frag.seq_name = seq_name_table[pos];
+    n_images++;
+
+    /* Odd image: subject side */
+    img_idx++;
+    pos = GetSeqIndex(0, seq_count - 1, cur_msp.sbjct.frag.seq_name);
+    if (pos < 0) {
+      RLOG_ERR("Sequence %s not found in seq list\n", cur_msp.sbjct.frag.seq_name);
+      exit(4);
+    }
+    images[n_images].index        = img_idx;
+    images[n_images].frag.lb      = cur_msp.sbjct.frag.lb;
+    images[n_images].frag.rb      = cur_msp.sbjct.frag.rb;
+    images[n_images].frag.seq_name = seq_name_table[pos];
+    n_images++;
+
+    msp_ct++;
   }
 
-  /*
-   * Allocate MPROT_t array: one entry per MSP, indexed by MSP position (0-based).
-   * pe = element index for the query-side image; se = element index for subject-side.
-   * Both are initialised to 0 (unassigned).
-   */
+  qsort(images, n_images, sizeof(IMAGE_t), image_sort_cmp);
+
+  /* Write ori_msp_no -- read by eleredef to seed msp_index (the counter used
+   * to assign non-colliding indices to MSPs created during element dissection).
+   * Without this, new MSP indices start at 0 and collide with existing ones. */
+  {
+    FILE *ori_msp_no = fopen("summary/ori_msp_no", "w");
+    if (ori_msp_no) { fprintf(ori_msp_no, "%d\n", msp_ct); fclose(ori_msp_no); }
+  }
+
+  /* Rewind msp_file so img_charge() can do its sequential scan in pass 2 */
+  rewind(msp_file);
+
+  /* ============================================================
+   * Allocate MPROT_t array (one entry per MSP)
+   * ============================================================ */
   all_mprot = (MPROT_t **) malloc(msp_ct * sizeof(MPROT_t *));
   for (i = 0; i < msp_ct; i++) {
     all_mprot[i] = (MPROT_t *) malloc(sizeof(MPROT_t));
@@ -437,13 +635,16 @@ int main (int argc, char *argv[]) {
     all_mprot[i]->se = 0;
   }
 
-  /* ---- Pass 1: single-linkage clustering of images into elements ---- */
-  ele_def(method, frags, cutoff, &all_ep, &ele_ct, all_mprot);
+  /* ============================================================
+   * Pass 1: single-linkage clustering of images into elements
+   * ============================================================ */
+  ele_def(method, images, n_images, cutoff, &all_ep, &ele_ct, all_mprot);
+
+  free(images);
+  images = NULL;
 
   fclose(ele_no);
   fclose(img_prot);
-  fclose(msp_no);
-  fclose(frags);
 
   img_prot = fopen("ele_def_res/img_prot", "r");
 
@@ -458,9 +659,8 @@ int main (int argc, char *argv[]) {
   }
 
   /*
-   * Allocate IPROT_t arrays for the DUMBBELL pass.
-   * ELEDEF_IMGPROT_CAP (was: IMG_CAP) sets the batch size.
-   * When iprot_ct reaches the cap, DUMBBELL flushes the batch and resets.
+   * Allocate IPROT_t arrays for the dumbbell pass.
+   * ELEDEF_IMGPROT_CAP sets the batch size.
    */
   all_iprot    = (IPROT_t **) malloc(ELEDEF_IMGPROT_CAP * sizeof(IPROT_t *));
   iprot_shadow = (IPROT_t **) malloc(ELEDEF_IMGPROT_CAP * sizeof(IPROT_t *));
@@ -470,22 +670,32 @@ int main (int argc, char *argv[]) {
     iprot_shadow[i]       = all_iprot[i];
   }
 
-  /* ---- Pass 2: DUMBBELL -- load MSP detail and write element files ---- */
+  /* ============================================================
+   * Pass 2: dumbbell -- load MSP detail and write element records
+   * ============================================================ */
+  dumbbell_init(ep_array);
+
   while (fgets(line, 100, img_prot)) {
     sscanf(line, "%d %d\n",
            &all_iprot[iprot_ct]->ele_index,
            &all_iprot[iprot_ct]->index);
     iprot_ct++;
-    /* Flush when the buffer is full */
     if (iprot_ct == ELEDEF_IMGPROT_CAP) {
-      DUMBBELL;
+      dumbbell_flush(all_iprot, iprot_shadow, iprot_ct, all_mprot, msp_file);
       iprot_ct = 0;
     }
   }
 
   if (iprot_ct) {
-    for (i = 0; i < iprot_ct; i++) { iprot_shadow[i] = all_iprot[i]; }
-    DUMBBELL;
+    dumbbell_flush(all_iprot, iprot_shadow, iprot_ct, all_mprot, msp_file);
+  }
+
+  /* Flush the last element's buffer to ele_db */
+  if (cur_ele_fp) {
+    fclose(cur_ele_fp);
+    ele_db_write(cur_ele_index, cur_ele_buf, (int)cur_ele_buf_size);
+    free(cur_ele_buf);
+    cur_ele_fp = NULL;
   }
 
   /* ---- Cleanup ---- */
@@ -501,6 +711,8 @@ int main (int argc, char *argv[]) {
 
   for (i = 0; i < ele_ct; i++) { free(ep_array[i]); }
   free(ep_array);
+
+  ele_db_close();
 
   exit(0);
 }
@@ -531,7 +743,8 @@ int main (int argc, char *argv[]) {
  *
  * Parameters
  *   method     1 = sing_cov, 2 = doub_cov
- *   frags      FILE* of sorted IMAGE records
+ *   images     pre-sorted array of IMAGE_t records (from the in-memory sort)
+ *   n_images   number of entries in the images array
  *   cutoff     fractional-overlap threshold
  *   all_epp    output: linked list of EPROT_t records
  *   ecp        output: pointer to element count (was: *ecp in all callers)
@@ -543,37 +756,28 @@ int main (int argc, char *argv[]) {
  *   list is exhausted.  The name is a pun on "right time" by the original
  *   author.
  */
-void ele_def(int method, FILE *frags, float cutoff,
+void ele_def(int method, IMAGE_t *images, int n_images, float cutoff,
              EPROT_t **all_epp, int *ecp, MPROT_t **all_mprot) {
-  int i, img_ct, cov;
-  char line[100];
+  int img_ct, cov;
   FRAG_t ele_frag;
-  char fragname[SEQ_NAME_MAX_LEN];
-  int pos;
-  IMAGE_t img, *imgp;
-  IMG_DATA_t *cur, *prev=NULL, *remain=NULL, *tail, *tmp;
+  IMAGE_t img;
+  IMG_DATA_t *cur, *prev=NULL, *remain=NULL, *tail=NULL;
   short ritetime;      /* was: ritetime -- "right time" to start a new element */
-  EPROT_t *ep_tail, *ep_tmp;
+  EPROT_t *ep_tail=NULL;
+  int ii;   /* loop counter over the images array */
 
   ritetime = 1;   /* initially ready to start a new element */
 
   /*
-   * Read IMAGE records from the sorted image file.  Each line contains:
-   *   <img_index> <score> <seq_name> <lb> <rb>
-   *
-   * The score field is skipped (%*d) here; it was used only by imagespread
-   * to write the file.
+   * Iterate over the pre-sorted IMAGE array.
    *
    * Image index convention:
    *   even index (img.index % 2 == 0) => query side of the parent MSP
    *   odd  index (img.index % 2 == 1) => subject side of the parent MSP
    *   MSP position in file            => img.index / 2
    */
-  while (fgets(line, 100, frags)) {
-    sscanf(line, "%d %*d %s %d %d\n",
-           &img.index, fragname, &img.frag.lb, &img.frag.rb);
-    pos = GetSeqIndex(0, seq_count - 1, fragname);
-    img.frag.seq_name = seq_name_table[pos];
+  for (ii = 0; ii < n_images; ii++) {
+    img = images[ii];
 
     if (ritetime) {
       /* Start a new element seeded by this image */
@@ -589,7 +793,6 @@ void ele_def(int method, FILE *frags, float cutoff,
         all_mprot[img.index / 2]->pe = (*ecp);
       }
       fprintf(img_prot, "%d %d\n", (*ecp), img.index);
-      fflush(img_prot);
       continue;
     }
 
@@ -615,7 +818,6 @@ void ele_def(int method, FILE *frags, float cutoff,
           all_mprot[img.index / 2]->pe = (*ecp);
         }
         fprintf(img_prot, "%d %d\n", (*ecp), img.index);
-        fflush(img_prot);
 
         if (ele_frag.rb < img.frag.rb) {
           /* Element boundary extended: re-scan remain list */
@@ -623,17 +825,18 @@ void ele_def(int method, FILE *frags, float cutoff,
           cur  = remain;
           prev = NULL;
           while (cur) {
-            INCLUDE_IMAGE;
+            include_image(&cur, &prev, &remain, &tail, &ele_frag, *ecp,
+                          all_mprot, method, cutoff, &img_ct);
           }
         }
       } else {
         /* Image did not qualify: keep in remain list for later */
-        SAVE_IMG_TO_REMAINING_LIST;
+        save_img_to_remaining_list(img, &remain, &tail);
       }
     } else {
       /* Image falls outside this element: close element, process remain */
-      SAVE_ELEMENT_TO_EP_LIST;
-      SAVE_IMG_TO_REMAINING_LIST;
+      save_element_to_ep_list(*ecp, img_ct, ele_frag, all_epp, &ep_tail);
+      save_img_to_remaining_list(img, &remain, &tail);
       ritetime = 1;
 
       /*
@@ -643,16 +846,19 @@ void ele_def(int method, FILE *frags, float cutoff,
        */
       while (remain && ritetime) {
         cur = remain;
-        INIT_ELEMENT_FROM_REMAIN_LIST;
+        init_element_from_remain_list(&ritetime, ecp, &img_ct, &ele_frag,
+                                      all_mprot, &remain, &cur, &prev);
         /* cur now points to the rest of the remain list */
         while (cur) {
-          EVALUATE_REMAINING_IMAGE;
+          if (evaluate_remaining_image(&cur, &prev, &remain, &tail, &ele_frag,
+                                       *ecp, all_mprot, method, cutoff, &img_ct,
+                                       all_epp, &ep_tail, &ritetime)) break;
         }
       }
     }
-  }   /* end of main image-reading loop */
+  }   /* end of main image loop */
 
-  SAVE_ELEMENT_TO_EP_LIST;
+  save_element_to_ep_list(*ecp, img_ct, ele_frag, all_epp, &ep_tail);
   if (remain) ritetime = 1;
 
   /* Drain any images still in the remain list into their own elements */
@@ -662,13 +868,16 @@ void ele_def(int method, FILE *frags, float cutoff,
 
     while (cur) {
       if (ritetime) {
-        INIT_ELEMENT_FROM_REMAIN_LIST;
+        init_element_from_remain_list(&ritetime, ecp, &img_ct, &ele_frag,
+                                      all_mprot, &remain, &cur, &prev);
         continue;
       }
-      EVALUATE_REMAINING_IMAGE;
+      if (evaluate_remaining_image(&cur, &prev, &remain, &tail, &ele_frag,
+                                   *ecp, all_mprot, method, cutoff, &img_ct,
+                                   all_epp, &ep_tail, &ritetime)) break;
     }
     if (!cur) {
-      SAVE_ELEMENT_TO_EP_LIST;
+      save_element_to_ep_list(*ecp, img_ct, ele_frag, all_epp, &ep_tail);
       ritetime = 1;
     }
   }

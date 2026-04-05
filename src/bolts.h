@@ -51,8 +51,11 @@
  * the first line of that file by GetSeqNames().  Used as the upper
  * bound in GetSeqIndex() binary searches and as a bound check in
  * GetSeqNames() itself.
+ *
+ * Defined in seqlist.c; declared extern here so all translation units
+ * that include this header share the same instance via the linker.
  */
-int32_t seq_count;
+extern int32_t seq_count;
 /* Backward-compat alias -- remove after all call sites are migrated */
 #define seq_no seq_count
 
@@ -64,8 +67,10 @@ int32_t seq_count;
  * characters.  Allocated by GetSeqNames(); never freed (pipeline
  * programs are short-lived).  Must be lexically sorted on input for the
  * binary-search invariant in GetSeqIndex() to hold.
+ *
+ * Defined in seqlist.c; declared extern here.
  */
-char **seq_name_table;
+extern char **seq_name_table;
 /* Backward-compat alias */
 #define seq_names seq_name_table
 
