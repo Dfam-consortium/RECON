@@ -72,7 +72,7 @@ equivalence-testing scripts.
 
 ## Running
 
-The pipeline is driven by `scripts/run_recon.sh`:
+The pipeline is driven by `scripts/run_recon.sh` (previously recon.pl):
 
 ```sh
 scripts/run_recon.sh <bin_dir> <seq_list> <msp_file> [num_sections] [work_dir]
@@ -90,20 +90,6 @@ conventions each stage expects).
 
 ## Input Format
 
-### Sequence name list
-
-The first positional argument to each stage is a file listing the input
-sequence names, one per line.  Lines may be bare names or FASTA headers
-(`>`-prefixed).  The first line must be an integer giving the total count.
-Names must be sorted in lexical order.
-
-```
-3
-chr1
-chr2
-chrX
-```
-
 ### MSP file
 
 Pairwise local alignments in the MSP format — one alignment per line:
@@ -115,14 +101,45 @@ score %iden start end query_name start end subject_name
 MSPs can be generated from BLAST output using the `MSPCollect` tool:
 
 ```sh
-MSPCollect blast_output.txt > alignments.msp
+MSPCollect.pl blast_output.txt > alignments.msp
 # for multiple BLAST outputs, concatenate:
 cat run1.msp run2.msp > alignments.msp
 ```
 
-The `num_sections` argument to `run_recon.sh` (default 1) controls how many
-sections `imagespread` partitions the MSP file into when using the old
-(1.08) pipeline.  It is ignored for the new pipeline.
+### Sequence name list
+
+The first positional argument to each stage is a file listing the input
+sequence names, one per line.  The first line must be an integer giving
+the total count.  Names must be sorted in lexical order.
+
+```
+3
+chr1
+chr2
+chrX
+```
+
+The easiest way to generate this file is from the MSP file itself, since
+every sequence that participated in at least one alignment is present as
+either a query or subject name (columns 5 and 8):
+
+```sh
+awk '{print $5; print $8}' alignments.msp | sort -u > names.tmp
+wc -l < names.tmp | cat - names.tmp > seqnames
+rm names.tmp
+```
+
+Alternatively, generate it directly from the FASTA file that was searched:
+
+```sh
+grep '^>' sequences.fa | sed 's/^>//' | awk '{print $1}' | sort -u > names.tmp
+wc -l < names.tmp | cat - names.tmp > seqnames
+rm names.tmp
+```
+
+The FASTA-based approach is more correct if some sequences had no
+alignments at all (they would be absent from the MSP file but should still
+appear in the name list).
 
 ---
 
