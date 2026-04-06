@@ -18,6 +18,15 @@
 #ifndef RECON_DEFS_H
 #define RECON_DEFS_H
 
+/*
+ * RECON_VERSION  --  release version string, injected by the Makefile via
+ * -DRECON_VERSION=\"$(VERSION)\".  Falls back to "unknown" if built outside
+ * the project Makefile.
+ */
+#ifndef RECON_VERSION
+#define RECON_VERSION "unknown"
+#endif
+
 
 /* ============================================================
  * Sequence-list / global limits   (originally in bolts.h)

@@ -5,9 +5,11 @@
 #
 VERSION = 1.09
 
-## Where binaries are installed (default: bin/ at the project root)
-BINDIR  = bin
-MANDIR  = $(HOME)/man
+## Where files are installed (default: bin/ at the project root)
+## Binaries, run_recon.sh, README.md, VALIDATION.md, and LICENSE
+## are all copied here by "make install".
+INSTALL_DIR = bin
+MANDIR      = $(HOME)/man
 
 ## Compiler
 CC = gcc
@@ -46,7 +48,7 @@ TUNABLES =
 
 ## -I src     finds all project headers (ele.h, msps.h, ...)
 ## -I minunit finds the minunit test framework header
-CFLAGS = -O -I src -I minunit $(TUNABLES)
+CFLAGS = -O -I src -I minunit -DRECON_VERSION=\"$(VERSION)\" $(TUNABLES)
 
 ## Compression program for dist target
 COMPRESS = gzip
@@ -57,7 +59,7 @@ COMPRESS = gzip
 SHELL = /bin/sh
 LIBS  = -lm
 
-PROGS = $(BINDIR)/eledef $(BINDIR)/eleredef $(BINDIR)/edgeredef $(BINDIR)/famdef
+PROGS = $(INSTALL_DIR)/eledef $(INSTALL_DIR)/eleredef $(INSTALL_DIR)/edgeredef $(INSTALL_DIR)/famdef
 
 HDRS = src/bolts.h src/seqlist.h src/msps.h src/ele.h src/ele_db.h \
        src/treeview.h src/eleredef.h src/recon_defs.h src/recon_log.h \
@@ -87,18 +89,23 @@ OBJS_REDEF = src/redef_boundary.o src/redef_edges.o src/redef_dissect.o
 OBJS_COMMON = $(OBJS_SEQ) $(OBJS_MSP)
 OBJS_FULL   = $(OBJS_COMMON) $(OBJS_ELE) $(OBJS_DB)
 
-all: $(BINDIR) $(PROGS)
+all: $(INSTALL_DIR) $(PROGS)
 
-$(BINDIR):
-	mkdir -p $(BINDIR)
+$(INSTALL_DIR):
+	mkdir -p $(INSTALL_DIR)
 
 install: all
+	cp scripts/run_recon.sh $(INSTALL_DIR)/run_recon.sh
+	chmod +x $(INSTALL_DIR)/run_recon.sh
+	cp README.md VALIDATION.md LICENSE $(INSTALL_DIR)/
 
 PROG_NAMES = eledef eleredef edgeredef famdef
 
 clean:
 	-rm -f $(PROGS) $(addprefix src/, $(PROG_NAMES)) src/*_dbg src/*.o src/*~ *~ core
 	-rm -f *.Addrs *.Counts *.pixie Makefile.bak TAGS
+	-rm -f $(INSTALL_DIR)/run_recon.sh $(INSTALL_DIR)/README.md \
+	        $(INSTALL_DIR)/VALIDATION.md $(INSTALL_DIR)/LICENSE
 
 tags:
 	etags -t $(DISTFILES)
@@ -149,14 +156,14 @@ src/redef_dissect.o: src/redef_dissect.c src/redef_dissect.h src/redef_boundary.
 ## Each program is compiled from its own .c file and linked against the
 ## shared object files that provide the library functions it uses.
 
-$(BINDIR)/eledef: src/eledef.c $(OBJS_COMMON) $(OBJS_DB) $(HDRS)
+$(INSTALL_DIR)/eledef: src/eledef.c $(OBJS_COMMON) $(OBJS_DB) $(HDRS)
 	$(CC) $(CFLAGS) $(MDEFS) -o $@ src/eledef.c $(OBJS_COMMON) $(OBJS_DB) $(LIBS)
 
-$(BINDIR)/eleredef: src/eleredef.c $(OBJS_REDEF) $(OBJS_FULL) $(OBJS_TREE) $(HDRS)
+$(INSTALL_DIR)/eleredef: src/eleredef.c $(OBJS_REDEF) $(OBJS_FULL) $(OBJS_TREE) $(HDRS)
 	$(CC) $(CFLAGS) $(MDEFS) -o $@ src/eleredef.c $(OBJS_REDEF) $(OBJS_FULL) $(OBJS_TREE) $(LIBS)
 
-$(BINDIR)/edgeredef: src/edgeredef.c $(OBJS_FULL) $(HDRS)
+$(INSTALL_DIR)/edgeredef: src/edgeredef.c $(OBJS_FULL) $(HDRS)
 	$(CC) $(CFLAGS) $(MDEFS) -o $@ src/edgeredef.c $(OBJS_FULL) $(LIBS)
 
-$(BINDIR)/famdef: src/famdef.c $(OBJS_FULL) $(HDRS)
+$(INSTALL_DIR)/famdef: src/famdef.c $(OBJS_FULL) $(HDRS)
 	$(CC) $(CFLAGS) $(MDEFS) -o $@ src/famdef.c $(OBJS_FULL) $(LIBS)

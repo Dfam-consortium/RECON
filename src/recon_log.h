@@ -55,6 +55,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "recon_defs.h"
 
 
 /* ---- Log level constants ---- */
@@ -120,6 +121,28 @@ extern FILE *recon_log_fp;
  *     // remaining positional argument parsing unchanged ...
  *   }
  */
+/*
+ * recon_check_version_flag  --  if "-v" appears anywhere in argv, print
+ * the version string and exit(0).  Call this as the very first statement
+ * in main(), before any other argument parsing.
+ *
+ * Example
+ *   int main(int argc, char *argv[]) {
+ *     recon_check_version_flag(argc, argv);
+ *     ...
+ *   }
+ */
+static inline void recon_check_version_flag(int argc, char **argv) {
+  int i;
+  for (i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-v") == 0) {
+      printf("RECON version %s\n", RECON_VERSION);
+      exit(0);
+    }
+  }
+}
+
+
 static inline int recon_parse_log_flag(int *argc_p, char **argv) {
   int i, j;
   for (i = 1; i < *argc_p; i++) {

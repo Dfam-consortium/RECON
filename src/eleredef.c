@@ -111,6 +111,9 @@ int main (int argc, char *argv[]) {
   FILE *ele_no, *msp_no, *edge_no, *size_list, *new_stat;
   FILE *seq_list;
 
+  /* Check for -v (version) before any other parsing */
+  recon_check_version_flag(argc, argv);
+
   /* Strip optional "-l <level>" before positional arg parsing */
   if (recon_parse_log_flag(&argc, argv)) {
     fprintf(stderr, "error: -l requires a numeric log level argument\n");
@@ -124,7 +127,8 @@ int main (int argc, char *argv[]) {
            "  start     1-based element index to start from (optional, default 1)\n"
            "  clan_ct   initial clan counter value (optional, default 0)\n"
            "  -l <level>  log verbosity: 0=silent 1=error 2=warn "
-           "3=info(default) 4=debug\n");
+           "3=info(default) 4=debug\n"
+           "  -v          print version and exit\n");
     exit(1);
   }
 

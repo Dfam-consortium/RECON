@@ -496,6 +496,9 @@ int main (int argc, char *argv[]) {
   int       img_idx;
   int       pos;
 
+  /* Check for -v (version) before any other parsing */
+  recon_check_version_flag(argc, argv);
+
   /* Strip the optional "-l <level>" flag before positional arg parsing */
   if (recon_parse_log_flag(&argc, argv)) {
     fprintf(stderr, "error: -l requires a numeric log level argument\n");
@@ -508,7 +511,8 @@ int main (int argc, char *argv[]) {
            "for method, choose 'single' or 'double'\n"
            "cutoff is optional\n"
            "-l <level>  log verbosity: 0=silent 1=error 2=warn "
-           "3=info(default) 4=debug\n");
+           "3=info(default) 4=debug\n"
+           "-v          print version and exit\n");
     exit(1);
   }
 
