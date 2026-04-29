@@ -1,0 +1,39 @@
+# Compiled objects and binaries
+src/*.o
+src/*_dbg
+bin/
+
+# Distribution archives
+recon-*/
+*.tar
+*.tar.gz
+
+# equiv_test.sh failure snapshot
+equiv_test_result/
+
+# Profiling and debug artifacts
+*.Addrs
+*.Counts
+*.pixie
+core
+TAGS
+
+# Editor / IDE
+.idea/
+.vscode/
+
+# Personal / local files not part of the project
+notebook
+scripts/analyze_bug1_impact.sh
+
+# Environment dotfiles (should not be in a project repo)
+.bash_profile
+.bashrc
+.zshrc
+.zprofile
+.profile
+.gitconfig
+.gitmodules
+.claude/
+.mcp.json
+.ripgreprc

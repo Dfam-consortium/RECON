@@ -1,0 +1,39 @@
+#!/bin/sh
+# imagespread -- compatibility shim for pipelines built against RECON <= 1.08
+#
+# In RECON >= 1.09, imagespread's work was merged into eledef, which now reads
+# msps.out directly.  This script creates the empty placeholder files that
+# third-party pipelines expect (images/spread*, images/errors) so their sort
+# and cleanup steps succeed without error.  The resulting images/images_sorted
+# is never read by the current pipeline tools.
+#
+# Usage: imagespread seq_list msp_file [num_spread_files]
+#   (same signature as the original binary; arguments are accepted but ignored)
+
+if [ "$1" = "--version" ] || [ "$1" = "-version" ]; then
+    echo "imagespread (RECON compatibility shim) -- replaced by eledef in RECON 1.09"
+    exit 0
+fi
+
+if [ $# -lt 2 ]; then
+    echo "usage: imagespread seq_name_list msp_list [number_of_output_files]" >&2
+    echo "  (this is a compatibility shim; arguments are accepted but not processed)" >&2
+    exit 1
+fi
+
+NOOF=${3:-1}
+
+echo "imagespread: NOTE: this is a compatibility shim. imagespread was merged into eledef in RECON 1.09." >&2
+
+mkdir -p images summary ele_store
+
+# Create the expected spread files (empty) so downstream sort steps succeed.
+i=1
+while [ "$i" -le "$NOOF" ]; do
+    : > "images/spread${i}"
+    i=$((i + 1))
+done
+
+: > images/errors
+
+exit 0

@@ -1,7 +1,54 @@
+/*
+ * edgeredef.c  --  Stage 4: edge redefinition and PPS filtering
+ *
+ * Algorithm overview
+ * ------------------
+ * This stage reads the elements produced by eleredef (in tmp/) and refines
+ * the inter-element edge graph by:
+ *
+ * 1. edge_filt() / find_PPS() / edge_update():
+ *    Detects and demotes "Partial Peripheral Similarity" (PPS) edges.
+ *    A PPS edge connects a small element to a much larger one, suggesting
+ *    the small element matches only a peripheral portion of the larger
+ *    element rather than representing a true family relationship.
+ *    Detection criterion: length_ratio < EDGEREDEF_EDGE_CUTOFF (was CUTOFF3).
+ *    Only the highest-scoring PPS edge per element is promoted to 'P';
+ *    the rest are demoted to 'S'.
+ *
+ * 2. edge_repair() / best_link():
+ *    After PPS filtering, elements that have no remaining 'p' (primary)
+ *    edges are repaired by promoting the best 'S' or 'P' edge to 'P'.
+ *
+ * The algorithm processes elements in two passes:
+ *   Pass 1: general_edge_redef() -- builds local BFS networks and applies
+ *           edge_filt() to all elements in each network.
+ *   Pass 2: edge_repair()        -- repairs elements with no primary edge.
+ *
+ * Named constants from recon_defs.h:
+ *   EDGEREDEF_EDGE_CUTOFF (was CUTOFF3 = 0.7)
+ *   BFS_CLAN_DEPTH        (was DEPTH = 3)
+ *
+ * Usage
+ *   edgeredef seq_list [start] [-l log_level]
+ *
+ *   -l <level>  log verbosity: 0=silent 1=error 2=warn 3=info 4=debug
+ *               (default: 3=info)
+ *
+ * Author: Zhirong Bao
+ * Modifications: Robert Hubley, Institute for Systems Biology
+ */
+
 #include "ele.h"
 #include "seqlist.h"
 
-#define CUTOFF3 0.7
+/* system() is called for its side-effect (cp command); return value ignored. */
+#pragma GCC diagnostic ignored "-Wunused-result"
+
+/* ---- Per-program log level storage (required by recon_log.h) ---- */
+int   recon_log_level = RECON_LOG_INFO;
+FILE *recon_log_fp    = NULL;
+
+/* EDGEREDEF_EDGE_CUTOFF (= 0.7) defined in recon_defs.h; alias CUTOFF3 also available */
 
 
 
@@ -30,9 +77,23 @@ int main (int argc, char *argv[]) {
   char line[35], stat;
   FILE *seq_list, *ele_no, *redef_stat;
 
-  /* processing command line */
+  /* Check for -v (version) before any other parsing */
+  recon_check_version_flag(argc, argv);
+
+  /* Strip optional "-l <level>" before positional arg parsing */
+  if (recon_parse_log_flag(&argc, argv)) {
+    fprintf(stderr, "error: -l requires a numeric log level argument\n");
+    exit(1);
+  }
+
+  /* Validate command line */
   if (argc == 1) {
-    printf("usage: fam_def seq_list start\n where seq_list is the list of sequence names, start is the index of the element to start defining families.  The latter one is optional.\n");
+    printf("usage: edgeredef seq_list [start] [-l level]\n"
+           "  seq_list  list of sequence names\n"
+           "  start     1-based element index to start from (optional)\n"
+           "  -l <level>  log verbosity: 0=silent 1=error 2=warn "
+           "3=info(default) 4=debug\n"
+           "  -v          print version and exit\n");
     exit(1);
   }
 
@@ -63,6 +124,10 @@ int main (int argc, char *argv[]) {
     printf("Can not open log_file.  Exiting\n");
     exit(1);
   }
+  recon_log_fp = log_file;
+
+  /* Open element database (updated by this stage) */
+  ele_db_open();
 
   while (fgets(line, 15, ele_no)) {
     ele_ct = atoi(line);
@@ -105,10 +170,8 @@ int main (int argc, char *argv[]) {
   for (i=start; i<ele_ct; i++) {
     if ((*(all_ele+i))->stat != 'O' && (*(all_ele+i))->stat != 'X') {
       fprintf(log_file, "evaluating edges of element %d\n", (*(all_ele+i))->index);
-      fflush(log_file);
       if ((*(all_ele+i))->stat == 'v') {
 	general_edge_redef(*(all_ele+i));
-	report_redef_stat();
       } else if((*(all_ele+i))->stat != 'y') {
 	err_no ++;
 	fprintf(log_file, "ele %d %c not properly defined\n",  (*(all_ele+i))->index, (*(all_ele+i))->stat);
@@ -121,7 +184,6 @@ int main (int argc, char *argv[]) {
   for (i=start; i<ele_ct; i++) {
     if ((*(all_ele+i))->stat != 'O' && (*(all_ele+i))->stat != 'X') {
       fprintf(log_file, "repairing edges of element %d\n", (*(all_ele+i))->index);
-      fflush(log_file);
       if ((*(all_ele+i))->stat == 'y') {
         edge_repair(*(all_ele+i));
       } else {
@@ -133,12 +195,15 @@ int main (int argc, char *argv[]) {
     }
   }
 
+  report_redef_stat();
+
   fprintf(log_file, "total numbers: %d elements, %d msps, %d edges\n", ele_ct, msp_index+1, edge_index+1);
   fprintf(log_file, "%d files read, %d msps seen, %d edges seen\n", files_read, msp_ct, edge_ct);
   fprintf(log_file, "%d errors, %d msps and %d edges left in memory, \n", err_no, msp_left, edge_left);
   fflush(log_file);
   fclose(log_file);
 
+  ele_db_close();
 
   exit(0);
 }
@@ -439,7 +504,11 @@ void edge_repair(ELE_INFO_t *ele_info) {
       if (!hanger) {
 	fprintf(log_file, "ele %d can not be repaired.\n", ele_info->index);
       } else if (hanger->to_edge->type == 'S') {
-	hanger->to_edge->type == 'P';
+#ifdef ORIGINAL_BUGS
+        hanger->to_edge->type == 'P';  /* original: comparison result discarded, type unchanged */
+#else
+        hanger->to_edge->type = 'P';   /* fix: promote best secondary edge to primary */
+#endif
 	ele_write_out(ele_info, 2);
       }
     }

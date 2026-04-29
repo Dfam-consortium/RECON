@@ -1,72 +1,44 @@
+/*
+ * seqlist.h  --  Sequence-name table management for the RECON pipeline
+ *
+ * Provides two functions used by all five RECON programs:
+ *
+ *   GetSeqNames()   -- reads the seq_list file and populates the global
+ *                      seq_name_table[] array.
+ *
+ *   GetSeqIndex()   -- binary searches seq_name_table[] for a given name
+ *                      and returns its 0-based index, or -1 if not found.
+ *
+ * The seq_list file format
+ * ------------------------
+ * Line 1:   an integer giving the total number of sequences that follow.
+ * Lines 2+: one sequence identifier per line, either as a bare name or
+ *           in FASTA header format ("> name ...").  Only the first
+ *           whitespace-delimited token after any leading ">" and spaces
+ *           is stored.  Lines must be in lexical (ASCII) sort order for
+ *           GetSeqIndex()'s binary search to be correct.
+ *
+ * Dependency on bolts.h
+ * ---------------------
+ * seq_count and seq_name_table are declared in bolts.h; this file
+ * only reads and writes those globals.
+ *
+ * Author: Zhirong Bao
+ * Modifications: Robert Hubley, Institute for Systems Biology
+ */
+
 #ifndef __SEQLIST_H__
 #define __SEQLIST_H__
+
 #include <stdio.h>
 #include <ctype.h>
+#include <string.h>
 #include "bolts.h"
-#include "string.h"
 
+
+/* ---- function prototypes ---- */
 void GetSeqNames(FILE *);
-int GetSeqIndex(int, int, char *);
+int  GetSeqIndex(int, int, char *);
 
 
-
-void GetSeqNames(FILE *seq_list) {
-  char line[256];
-  int seq_ct = -1;
-  char *name_start;
-
-  /* get the number of sequences in the list, and generates an array of proper size to hold the list */
-  fgets(line, 255, seq_list);
-  seq_no = atoi(line);
-  if (!seq_no) {
-    printf("First line in the list of sequences must be an integer,\nwhich is the number of sequences in the list.  Exit\n");
-    exit(2);
-  }
-  seq_names = (char **) malloc(seq_no*sizeof(char *));
-
-  /* get the names of the sequences */
-  while (fgets(line, 255, seq_list)) {
-      seq_ct ++;
-      if (seq_ct == seq_no) {
-	printf("More sequence names than indicated at the begining of the file.  Exit.\n");
-	exit(2);
-      }
-      *(seq_names+seq_ct) = (char *) malloc(NAME_LEN*sizeof(char));
-      /* skip the '>' and possilbe spaces following it at the beginning of the line, in case the name is grepped directly from a fasta file */
-      name_start = line;
-      if (line[0] == '>') {
-	name_start++;
-	while (isspace(*name_start)) name_start++;
-      } 
-      strncpy(*(seq_names+seq_ct), name_start, NAME_LEN-1);
-      /* mark the end of the string */
-	 name_start = *(seq_names+seq_ct);
-	 while (/**name_start != EOF &&*/ !isspace(*name_start)) name_start++;
-	 *name_start = '\0';
-  }
-
-  /* we assume that the list is already sorted lexically, which is done in get-names.pl */
-}
-
-
-
-
-/* binary search of a sorted list of sequence names */
-/* returns position in the array if found */
-/* returns -1 if not found */
-int GetSeqIndex(int left, int right, char *seq_name) {
-  int pos, dir;
-
-  if (left <= right) {
-    pos = (left+right)/2;
-    dir = strncmp(seq_name, *(seq_names+pos), NAME_LEN);
-    if (dir < 0) return GetSeqIndex(left, pos-1, seq_name);
-    else if (dir > 0) return GetSeqIndex(pos+1, right, seq_name);
-    else return pos;
-  } else {
-    return -1;
-  }
-}
-
-
-#endif
+#endif /* __SEQLIST_H__ */
