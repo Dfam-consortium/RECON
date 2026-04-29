@@ -97,15 +97,20 @@ $(INSTALL_DIR):
 install: all
 	cp scripts/run_recon.sh $(INSTALL_DIR)/run_recon.sh
 	chmod +x $(INSTALL_DIR)/run_recon.sh
+	cp scripts/imagespread $(INSTALL_DIR)/imagespread
+	chmod +x $(INSTALL_DIR)/imagespread
 	cp README.md VALIDATION.md LICENSE $(INSTALL_DIR)/
+	printf '# Support for RepeatModeler pre-2.0.8\nVersion $(VERSION) (%s)\n# See README.md for program documentation.\n' \
+	  "$$(date '+%b %Y')" > $(INSTALL_DIR)/00README
 
 PROG_NAMES = eledef eleredef edgeredef famdef
 
 clean:
 	-rm -f $(PROGS) $(addprefix src/, $(PROG_NAMES)) src/*_dbg src/*.o src/*~ *~ core
 	-rm -f *.Addrs *.Counts *.pixie Makefile.bak TAGS
-	-rm -f $(INSTALL_DIR)/run_recon.sh $(INSTALL_DIR)/README.md \
-	        $(INSTALL_DIR)/VALIDATION.md $(INSTALL_DIR)/LICENSE
+	-rm -f $(INSTALL_DIR)/run_recon.sh $(INSTALL_DIR)/imagespread \
+	        $(INSTALL_DIR)/README.md $(INSTALL_DIR)/VALIDATION.md \
+	        $(INSTALL_DIR)/LICENSE $(INSTALL_DIR)/00README
 
 tags:
 	etags -t $(DISTFILES)

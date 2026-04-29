@@ -2,17 +2,24 @@
 
 ## v1.09 (development)
 
+- Fixed bug which prohibited last-case merging of related families dating
+  back to the 1.01 (original release -- possibly earlier) version.
+  NOTE: This is a breaking change which may be reverted with the use of
+  the `ORIGINAL_BUGS` compilation flag.
 - Merged `imagespread` binary into `eledef`; eliminated `images/` directory
 - Replaced per-element `tmp/e<N>` files with flat-file element database
   (`ele_store/elements.db` + `ele_store/elements.idx`)
+  This reduces the huge number of small files and allows for more efficient
+  random access.
 - Split 2,500-line `eleredef.c` into four focused modules
   (`redef_boundary.c`, `redef_edges.c`, `redef_dissect.c`)
 - Moved all tunable constants to `recon_defs.h`; added structured logging
-- Fixed O(N²) `report_redef_stat()` bottleneck in `edgeredef`; removed
+- Fixed O(N^2) `report_redef_stat()` bottleneck in `edgeredef`; removed
   unnecessary `fflush()` calls from inner loops (~12× speedup on large runs)
 - Added `scripts/` equivalence-testing infrastructure
 - Added `ORIGINAL_BUGS` compilation flag to enable bit-exact comparison
-  against RECON 1.08
+  against pre RECON 1.09 versions
+- Added backwards compatibility using a dummy imagespread script
 
 ## v1.08 (2014-02-05)
 

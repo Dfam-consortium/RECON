@@ -20,7 +20,9 @@ testing but rather by fine-scale characterisation of functional correctness.
 
 ## The `ORIGINAL_BUGS` Compilation Flag
 
-Two pre-existing bugs were present in the released RECON 1.08 binary.
+Two pre-existing bugs were present since the original release and perhaps
+earlier.
+
 Fixing them changes the pipeline output, which would make a bitwise
 comparison against the released binary impossible even when the refactoring
 itself is correct.
@@ -37,7 +39,7 @@ To separate the two concerns, both bugs are preserved behind an
 ```
 
 Building with `-DORIGINAL_BUGS` re-enables the original behaviour, producing
-output that is bit-for-bit identical to RECON 1.08 on the same input.
+output that is bit-for-bit identical to previous versions on the same input.
 Building without the flag (the default) applies the bug fixes.
 
 ### Bug 1 — `edgeredef.c`: off-by-one in loop bound

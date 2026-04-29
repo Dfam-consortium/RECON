@@ -126,7 +126,7 @@ mkdir "$TEST_BIN_DIR"
 echo "==> Building ${TEST_LABEL} binaries from $PROJ_DIR ..."
 (cd "$PROJ_DIR" \
     && make clean > /dev/null 2>&1 \
-    && make TUNABLES="$TEST_TUNABLES" BINDIR="$TEST_BIN_DIR" install 2>&1) \
+    && make TUNABLES="$TEST_TUNABLES" INSTALL_DIR="$TEST_BIN_DIR" install 2>&1) \
     || { echo "error: test build failed" >&2; exit 2; }
 
 # ---- In self-compare mode, also build the ORIGINAL_BUGS reference ----
@@ -136,7 +136,7 @@ if [ $SELF_COMPARE -eq 1 ]; then
     echo "==> Building ORIGINAL_BUGS (reference) binaries from $PROJ_DIR ..."
     (cd "$PROJ_DIR" \
         && make clean > /dev/null 2>&1 \
-        && make TUNABLES="-DORIGINAL_BUGS" BINDIR="$REF_BIN_DIR" install 2>&1) \
+        && make TUNABLES="-DORIGINAL_BUGS" INSTALL_DIR="$REF_BIN_DIR" install 2>&1) \
         || { echo "error: ORIGINAL_BUGS build failed" >&2; exit 2; }
     REF_LABEL="original-bugs"
 else
