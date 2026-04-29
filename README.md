@@ -15,9 +15,17 @@ School of Medicine, 2002).
 This repository has been substantially refactored and optimized with the
 assistance of AI coding agents (Claude, GitHub Copilot).
 
-Correctness is validated by comparing pipeline output against the released
+Correctness was validated by comparing pipeline output against the released
 RECON 1.08 binary on a suite of real genomic datasets — not by manual code
-review alone.  See [VALIDATION.md](VALIDATION.md) for the full description
+review alone.  
+
+The short term goal is to make some long waited improvements to to the codebase
+while maintaining API stability and output consistency in-line with the principals
+of https://rewrites.bio. The long-term goal will be to develop unit tests for
+the core algorithms so that future changes can be validated not by equivalence
+testing but rather by fine-scale characterisation of functional correctness.
+
+See [VALIDATION.md](VALIDATION.md) for the full description
 of the equivalence-testing infrastructure.
 
 ---

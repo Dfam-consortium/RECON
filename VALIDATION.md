@@ -4,11 +4,11 @@
 
 Because much of the refactoring and optimization work in this repository was
 performed with AI coding assistance rather than by manual rewrite, output
-correctness is validated systematically by comparing the pipeline's results
-against those of the original released binary (RECON 1.08) -- input/output
-equivalance testing.  This document describes the validation infrastructure,
-the test scripts, and the `-DORIGINAL_BUGS` compilation flag that preserves
-the original 1.08 behaviour.  
+correctness is validated by code-change review and systematically by 
+comparing the pipeline's results against those of the previous officially-released 
+binary (RECON 1.08) -- input/output equivalance testing.  This document 
+describes the validation infrastructure, the test scripts, and the `-DORIGINAL_BUGS` 
+compilation flag that reverts two 1.09 bugfixes.
 
 The short term goal is to make some long waited improvements to to the codebase
 while maintaining API stability and output consistency in-line with the principals
