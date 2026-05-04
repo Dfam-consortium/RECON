@@ -1,11 +1,14 @@
 # Changelog
 
-## v1.09 (development)
+## v1.09
 
 - Fixed bug which prohibited last-case merging of related families dating
   back to the 1.01 (original release -- possibly earlier) version.
   NOTE: This is a breaking change which may be reverted with the use of
   the `ORIGINAL_BUGS` compilation flag.
+- Added a guardrail for the last-case merging functionality so that it
+  doesn't attempt to force together families when there is at least one  
+  primary edge.
 - Merged `imagespread` binary into `eledef`; eliminated `images/` directory
 - Replaced per-element `tmp/e<N>` files with flat-file element database
   (`ele_store/elements.db` + `ele_store/elements.idx`)
