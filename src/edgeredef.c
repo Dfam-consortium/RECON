@@ -68,6 +68,11 @@ EDGE_TREE_t * edge_update(ELE_INFO_t *, EDGE_TREE_t *, EDGE_TREE_t *);
 void edge_repair(ELE_INFO_t *);
 EDGE_TREE_t *best_link(ELE_INFO_t *, EDGE_TREE_t *);
 
+#ifdef EDGE_REPAIR_GUARD
+static int partner_has_primary_back(EDGE_TREE_t *, int);
+static int has_incoming_primary(ELE_INFO_t *, EDGE_TREE_t *);
+#endif
+
 
 
 
@@ -495,6 +500,45 @@ EDGE_TREE_t *edge_update(ELE_INFO_t *ele_info, EDGE_TREE_t *rt, EDGE_TREE_t *ref
 }
 
 
+#ifdef EDGE_REPAIR_GUARD
+/*
+ * partner_has_primary_back  --  returns 1 if rt contains a 'p' or 'P' edge
+ * whose other endpoint is target_idx.
+ */
+static int partner_has_primary_back(EDGE_TREE_t *rt, int target_idx) {
+  if (!rt) return 0;
+  if ((rt->to_edge->type == 'p' || rt->to_edge->type == 'P') &&
+      (rt->to_edge->ele1_info->index == target_idx ||
+       rt->to_edge->ele2_info->index == target_idx))
+    return 1;
+  return partner_has_primary_back(rt->l, target_idx) ||
+         partner_has_primary_back(rt->r, target_idx);
+}
+
+/*
+ * has_incoming_primary  --  returns 1 if any element adjacent to ele_info
+ * holds a 'p' or 'P' edge pointing back at it.
+ *
+ * When this is true, ele_info is already reachable in the primary-edge graph
+ * via its partner's edge, so edge_repair() should not create an additional
+ * primary connection.  We walk ele_info's edge tree, load each partner at
+ * stage 3 (edges only, no images), and scan for a reciprocal primary edge.
+ * Short-circuits on the first match found.
+ */
+static int has_incoming_primary(ELE_INFO_t *ele_info, EDGE_TREE_t *rt) {
+  if (!rt) return 0;
+  ELE_INFO_t *partner = linked_ele(ele_info, rt->to_edge);
+  ele_read_in(partner, 3);
+  int found = partner->ele &&
+              partner_has_primary_back(partner->ele->edges, ele_info->index);
+  ele_cleanup(&partner->ele);
+  if (found) return 1;
+  return has_incoming_primary(ele_info, rt->l) ||
+         has_incoming_primary(ele_info, rt->r);
+}
+#endif /* EDGE_REPAIR_GUARD */
+
+
 void edge_repair(ELE_INFO_t *ele_info) {
     EDGE_TREE_t *hanger;
 
@@ -506,10 +550,21 @@ void edge_repair(ELE_INFO_t *ele_info) {
       } else if (hanger->to_edge->type == 'S') {
 #ifdef ORIGINAL_BUGS
         hanger->to_edge->type == 'P';  /* original: comparison result discarded, type unchanged */
+        ele_write_out(ele_info, 2);
 #else
+#  ifdef EDGE_REPAIR_GUARD
+        if (has_incoming_primary(ele_info, ele_info->ele->edges)) {
+          RLOG_DBG("ele %d repair suppressed: already reachable via incoming primary edge.\n",
+                   ele_info->index);
+        } else {
+          hanger->to_edge->type = 'P';
+          ele_write_out(ele_info, 2);
+        }
+#  else
         hanger->to_edge->type = 'P';   /* fix: promote best secondary edge to primary */
-#endif
-	ele_write_out(ele_info, 2);
+        ele_write_out(ele_info, 2);
+#  endif /* EDGE_REPAIR_GUARD */
+#endif /* ORIGINAL_BUGS */
       }
     }
     ele_cleanup(&ele_info->ele);

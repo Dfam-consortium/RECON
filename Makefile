@@ -39,12 +39,20 @@ CC = gcc
 ##   ELEREDEF_CUTOFF_DOUBLE -- eleredef double-cov cutoff   (CUTOFF2=0.9)
 ##   EDGEREDEF_EDGE_CUTOFF  -- edge PPS filter ratio        (CUTOFF3=0.7)
 ##
+## Behaviour flags:
+##   EDGE_REPAIR_GUARD     -- suppress edge_repair() promotions when the
+##                            element is already reachable via a partner's
+##                            primary edge, preventing spurious cross-family
+##                            merges caused by PPS-edge promotion.
+##                            See src/recon_defs.h for details.
+##                            Example:  make TUNABLES="-DEDGE_REPAIR_GUARD"
+##
 ## Equivalence / regression testing flag:
 ##   ORIGINAL_BUGS         -- restore two pre-existing bugs for output
 ##                            comparison against the released binaries.
 ##                            See src/recon_defs.h for details.
 ##                            Example:  make TUNABLES="-DORIGINAL_BUGS"
-TUNABLES =
+TUNABLES = -DEDGE_REPAIR_GUARD
 
 ## -I src     finds all project headers (ele.h, msps.h, ...)
 ## -I minunit finds the minunit test framework header
