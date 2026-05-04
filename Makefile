@@ -3,7 +3,7 @@
 # Build targets:  all, install, clean
 # Source files live in src/; object files are placed in src/; binaries go to bin/.
 #
-VERSION = 1.09
+VERSION = 1.10
 
 ## Where files are installed (default: bin/ at the project root)
 ## Binaries, run_recon.sh, README.md, VALIDATION.md, and LICENSE
