@@ -303,6 +303,35 @@
 
 
 /* ============================================================
+ * EDGE_REPAIR_GUARD  --  suppress spurious promotions in edge_repair()
+ * ============================================================
+ *
+ * Compiling with -DEDGE_REPAIR_GUARD activates a partner check inside
+ * edge_repair() (edgeredef.c Pass 2).  Before promoting an element's best
+ * 'S' edge to 'P', the guard reads each adjacent element and checks whether
+ * any of them already hold a 'p' or 'P' edge pointing back at the element
+ * being considered.  If such a reciprocal primary edge exists the element is
+ * already reachable in the primary-edge graph and the promotion is skipped.
+ *
+ * Without the guard, edge_repair() promotes the best remaining 'S' (PPS)
+ * edge for any element whose own primary edges were all demoted by the PPS
+ * filter.  This can bridge biologically unrelated families when a demoted
+ * element's highest-scoring PPS edge points into a different repeat family.
+ *
+ * Cost: roughly doubles the I/O of edge_repair()'s second pass (one extra
+ * partner read per candidate, with early termination on the first reciprocal
+ * found).  This is a small fraction of total pipeline work.
+ *
+ * Incompatible with ORIGINAL_BUGS: the guard is compiled out when
+ * ORIGINAL_BUGS is defined, since that flag restores the original no-op
+ * assignment which makes the guard moot.
+ *
+ * To build with the guard:
+ *   make TUNABLES="-DEDGE_REPAIR_GUARD"
+ */
+
+
+/* ============================================================
  * ORIGINAL_BUGS  --  regression / equivalence-testing flag
  * ============================================================
  *
